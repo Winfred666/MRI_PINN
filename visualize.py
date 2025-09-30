@@ -260,7 +260,7 @@ def visualize_prediction_vs_groundtruth(pred_img, gt_img, vmin=0, vmax=1):
     # Compute absolute error 
     error_img = np.abs(pred_img - gt_img)
     # Stack images just horizontally
-    stacked = np.hstack((gt_img, pred_img, error_img))
+    stacked = np.vstack((gt_img, pred_img, error_img))
     # Clip values for visualization
     stacked = np.clip(stacked, vmin, vmax)
     return stacked
