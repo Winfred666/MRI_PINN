@@ -1,5 +1,6 @@
+from modules.data_module import CharacteristicDomain
 import numpy as np
-from positional_encoding import PositionalEncoding_Geo, PositionalEncoding_GeoTime
+from modules.positional_encoding import PositionalEncoding_Geo, PositionalEncoding_GeoTime
 from torch import nn
 import torch
 
@@ -150,16 +151,19 @@ class V_Net(nn.Module):
         return vx, vy, vz
 
 
+# advection-diffusion network
 class AD_Net(nn.Module):
+    # accept dti (x,y,z,3,3) as input to compute anisotropic diffusion tensor
     def __init__(
         self,
         c_layers,
         u_layers,
-        char_domain,
+        char_domain : CharacteristicDomain,
         freq_nums=(8,8,8,0),
         incompressible=False,
         positional_encoding=True,
         gamma_space=1.0,
+        DTI=None
     ):
         super().__init__()
 
@@ -177,6 +181,8 @@ class AD_Net(nn.Module):
             incompressible=incompressible,
             gamma_space=gamma_space,
         )
+        if DTI is not None:
+            self.DTI = torch.tensor(DTI, dtype=torch.float32).to(self.char_domain.device)
 
         # define learnable diffusivity
         self._log_Pe = nn.Parameter(torch.log(torch.tensor(char_domain.Pe_g)))
@@ -219,6 +225,20 @@ class AD_Net(nn.Module):
         grad_C = torch.autograd.grad(
             C_pred, x, grad_outputs=torch.ones_like(C_pred), create_graph=True
         )[0]
+
+        # When DTI is not known, apply anisotropic diffusion on grad_C for every timestep
+        if self.DTI is not None:
+            # x is normalized to [-1,1], need to scale back to index space
+            idx = (self.char_domain.recover_length_tensor(x[:, :3]) / self.char_domain._pixdim_tensor).int()
+            # safeguard for out-of-bound index
+            idx_x = torch.clamp(idx[:, 0], min=0, max=torch.tensor(self.DTI.shape[0]-1, device=idx.device))
+            idx_y = torch.clamp(idx[:, 1], min=0, max=torch.tensor(self.DTI.shape[1]-1, device=idx.device))
+            idx_z = torch.clamp(idx[:, 2], min=0, max=torch.tensor(self.DTI.shape[2]-1, device=idx.device))
+            D_tensor = self.DTI[idx_x, idx_y, idx_z, :, :]  # (N,3,3), where index_3 is used to gather the correct DTI values
+            grad_C_spatial = grad_C[:, :3].unsqueeze(-1)  # (N,3,1)
+            diff_flux = torch.bmm(D_tensor, grad_C_spatial).squeeze(-1)  # (N,3)
+            grad_C = torch.cat([diff_flux, grad_C[:, 3:4]], dim=1)  # (N,4)
+
         C_x, C_y, C_z, C_t = (
             grad_C[:, 0:1],
             grad_C[:, 1:2],

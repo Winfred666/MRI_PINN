@@ -8,16 +8,15 @@ nibabel>=5.1
 scikit-image>=0.21
 
 # Jupyter and interactive widgets
-ipykernel>=6.26
-jupyter>=1.0
-ipywidgets>=8.1
-jupyterlab_widgets>=3.0
-widgetsnbextension>=4.0
-ipympl>=0.9.3  # enables %matplotlib widget backend
+ipykernel
+jupyter
+ipywidgets
+jupyterlab_widgets
+widgetsnbextension
+ipympl  # enables %matplotlib widget backend
 
 # PyTorch + Lightning (install torch matching your CUDA/CPU setup)
 # For CUDA-specific wheels see: https://pytorch.org/get-started/locally/
-torch>=2.2
 lightning>=2.3
 tensorboard>=2.14
 

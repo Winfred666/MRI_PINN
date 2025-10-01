@@ -3,38 +3,21 @@ import torch
 import lightning as L
 
 
-def load_dcemri_data(path):
-    # 1. load training data (DCE-MRI)
-    downsample_data = np.load(path)
-    data = downsample_data["data"]
-    mask = downsample_data["mask"]
-    pixdim = downsample_data["pixdim"]
-    x, y, z, t = (
-        downsample_data["x"],
-        downsample_data["y"],
-        downsample_data["z"],
-        downsample_data["t"],
-    )
-    print("data_shape: ", data.shape, "pixdim: ", pixdim)
-    print("domain_shape: ",x.shape, y.shape, z.shape, t.shape)  # (nx,), (ny,), (nz,), (nt,)
-    print("min_c: ", data.min(), "max_c: ", data.max())
-    return data, mask, pixdim, x, y, z, t
-
-
-
-
 class CharacteristicDomain():
     # domain_shape is (x,y,z,t) shape of data
     def __init__(self, domain_shape, t, pixdim, device="cpu",D_mean = 1e-4):
         self.pixdim = pixdim
+        self._pixdim_tensor = torch.tensor(self.pixdim, dtype=torch.float32).to(device)
         self.domain_shape = domain_shape # (nx,ny,nz,nt)
         self.device = device
 
         # Spatial normalization to [-1, 1]
         # L_star is the half-size (radius) of the domain
         self.L_star = pixdim * (np.array(domain_shape[:3]) - 1) / 2.0
+        self._L_star_tensor = torch.tensor(self.L_star, dtype=torch.float32).to(device)
         # L_offset is the center of the domain in physical units
         self.L_offset = self.L_star 
+        self._L_offset_tensor = torch.tensor(self.L_offset, dtype=torch.float32).to(device)
 
         # Temporal normalization to [-1, 1]
         self.T_star = (t[-1] - t[0]) / 2.0 if (t[-1] - t[0]) != 0 else 1.0
@@ -48,10 +31,9 @@ class CharacteristicDomain():
         self.Pe_g = self.V_star.mean() * self.L_star.mean() / D_mean  # global Peclet number
     
     # also provide method to recover characteristic length and time scale to real world units
-    def recover_length_time(self, L_normalized, T_normalized):
-        L_real = L_normalized * self.L_star + self.L_offset
-        T_real = T_normalized * self.T_star + self.T_offset
-        return L_real, T_real
+    def recover_length_tensor(self, L_normalized):
+        L_real = L_normalized * self._L_star_tensor + self._L_offset_tensor
+        return L_real
 
     def characterise_length_time(self, L_real, T_real):
         L_normalized = (L_real - self.L_offset) / self.L_star
@@ -168,8 +150,8 @@ class VelocityDataModule(L.LightningDataModule):
             ds,
             batch_size=self.batch_size,
             shuffle=True,
-            num_workers=0,          # for safety of notebook and widget
-            persistent_workers=False
+            num_workers=8,          # for safety of notebook and widget
+            persistent_workers=True
         )
         
 
@@ -218,8 +200,8 @@ class DCEMRIDataModule(L.LightningDataModule):
             ds,
             batch_size=self.batch_size,
             shuffle=True,
-            num_workers=0,          # for safety of notebook and widget
-            persistent_workers=False
+            num_workers=8,          # for safety of notebook and widget
+            persistent_workers=True
         )
 
     def val_dataloader(self):
@@ -228,6 +210,6 @@ class DCEMRIDataModule(L.LightningDataModule):
             ds,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=0,
-            persistent_workers=False
+            num_workers=8,
+            persistent_workers=True
         )
