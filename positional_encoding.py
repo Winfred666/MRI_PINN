@@ -4,16 +4,17 @@ import math
 
 def _make_freqs(n: int, mode: str = "linear", base: float = 2.0, gamma: float = 1.0):
     """
+    Data range from -1 to 1 so better use 1 PI instead of 2 PI.
     Returns frequencies as a 1-D tensor.
     mode:
-      - 'linear': 2π * [1, 2, ..., n] * gamma
+      - 'linear': π * [1, 2, ..., n] * gamma
       - 'exp':    π * [base^0, base^1, ..., base^(n-1)] * gamma
     """
     if n <= 0:
         return torch.empty(0, dtype=torch.float32)
-    if mode == "linear":
+    if mode == "linear": # use 1 PI because the input always range between [-1,1] to use tanh activation.
         k = torch.arange(1, n + 1, dtype=torch.float32)  # 1..n
-        return (2.0 * math.pi) * k * gamma
+        return (1.0 * math.pi) * k * gamma
     else:
         k = torch.arange(n, dtype=torch.float32)         # 0..n-1
         return (math.pi) * (torch.pow(torch.tensor(base, dtype=torch.float32), k)) * gamma

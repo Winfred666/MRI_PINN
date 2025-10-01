@@ -1,9 +1,6 @@
 import numpy as np
-import matplotlib.pyplot as plt
 import torch
 import lightning as L
-from lightning.pytorch import Trainer
-from lightning.pytorch.loggers import TensorBoardLogger
 
 
 def load_dcemri_data(path):
@@ -18,7 +15,7 @@ def load_dcemri_data(path):
         downsample_data["z"],
         downsample_data["t"],
     )
-    print("data_shape: ", data.shape, "mask_shape: ", mask.shape, "pixdim: ", pixdim)
+    print("data_shape: ", data.shape, "pixdim: ", pixdim)
     print("domain_shape: ",x.shape, y.shape, z.shape, t.shape)  # (nx,), (ny,), (nz,), (nt,)
     print("min_c: ", data.min(), "max_c: ", data.max())
     return data, mask, pixdim, x, y, z, t
@@ -28,43 +25,47 @@ def load_dcemri_data(path):
 
 class CharacteristicDomain():
     # domain_shape is (x,y,z,t) shape of data
-    def __init__(self, domain_shape, t, pixdim, device="cpu",D_mean = 2e-4):
+    def __init__(self, domain_shape, t, pixdim, device="cpu",D_mean = 1e-4):
         self.pixdim = pixdim
         self.domain_shape = domain_shape # (nx,ny,nz,nt)
         self.device = device
 
-        self.L_star = pixdim * (np.array(domain_shape[:3]) - 1)
-        self.T_offset = t[0]
-        self.T_star = (t[-1] - t[0]) if (t[-1] - t[0]) != 0 else 1.0  # use range not absolute last
+        # Spatial normalization to [-1, 1]
+        # L_star is the half-size (radius) of the domain
+        self.L_star = pixdim * (np.array(domain_shape[:3]) - 1) / 2.0
+        # L_offset is the center of the domain in physical units
+        self.L_offset = self.L_star 
+
+        # Temporal normalization to [-1, 1]
+        self.T_star = (t[-1] - t[0]) / 2.0 if (t[-1] - t[0]) != 0 else 1.0
+        self.T_offset = (t[-1] + t[0]) / 2.0
+        
+        # This is now a utility for the data module, not for get_characteristic_... methods
         self.t_normalized = (t - self.T_offset) / self.T_star
 
         self.V_star = self.L_star / self.T_star  # characteristic velocity in grid/unit time
 
-        self.Pe_g = self.V_star * self.L_star.mean() / D_mean  # global Peclet number
+        self.Pe_g = self.V_star.mean() * self.L_star.mean() / D_mean  # global Peclet number
     
     # also provide method to recover characteristic length and time scale to real world units
     def recover_length_time(self, L_normalized, T_normalized):
-        L_real = L_normalized * self.L_star
+        L_real = L_normalized * self.L_star + self.L_offset
         T_real = T_normalized * self.T_star + self.T_offset
         return L_real, T_real
 
     def characterise_length_time(self, L_real, T_real):
-        L_normalized = L_real / self.L_star
+        L_normalized = (L_real - self.L_offset) / self.L_star
         T_normalized = (T_real - self.T_offset) / self.T_star
         return L_normalized, T_normalized
 
     def get_characteristic_geodomain(self, slice_zindex=None, return_mesh=False):
         """
-        Build normalized spatial grid (x,y,z) in [0,1].
-        Returns:
-          (N,3) torch.FloatTensor on device (default) where N = nx*ny*nz (or sliced)
-        Optional:
-          if return_mesh=True returns (X,Y,Z) numpy arrays (each shape (nx,ny,nz_slice))
+        Build normalized spatial grid (x,y,z) in [-1,1].
         """
         nx, ny, nz = self.domain_shape[:3]
-        x = np.linspace(0.0, 1.0, nx)
-        y = np.linspace(0.0, 1.0, ny)
-        z = np.linspace(0.0, 1.0, nz)
+        x = np.linspace(-1.0, 1.0, nx)
+        y = np.linspace(-1.0, 1.0, ny)
+        z = np.linspace(-1.0, 1.0, nz)
         if slice_zindex is not None:
             z = z[slice_zindex]
         X, Y, Z = np.meshgrid(x, y, z, indexing="ij")
@@ -75,13 +76,12 @@ class CharacteristicDomain():
 
     def get_characteristic_geotimedomain(self, slice_zindex=None, slice_tindex=None, return_mesh=False):
         """
-        Build normalized spatio–temporal grid (x,y,z,t) all in [0,1].
-        Returns (N,4) torch tensor unless return_mesh=True.
+        Build normalized spatio–temporal grid (x,y,z,t) all in [-1,1].
         """
         nx, ny, nz = self.domain_shape[:3]
-        x = np.linspace(0.0, 1.0, nx)
-        y = np.linspace(0.0, 1.0, ny)
-        z = np.linspace(0.0, 1.0, nz)
+        x = np.linspace(-1.0, 1.0, nx)
+        y = np.linspace(-1.0, 1.0, ny)
+        z = np.linspace(-1.0, 1.0, nz)
         if slice_zindex is not None:
             z = z[slice_zindex]
         t = self.t_normalized
@@ -171,11 +171,13 @@ class VelocityDataModule(L.LightningDataModule):
             num_workers=0,          # for safety of notebook and widget
             persistent_workers=False
         )
+        
 
 class DCEMRIDataModule(L.LightningDataModule):
     def __init__(self, data, char_domain, mask, batch_size=1024, device="cpu"):
         super().__init__()
-        self.C_star = max(data.max() / 100.0, 1e-8)  # avoid divide-by-zero
+        # Normalize output C to [0, 100.0] as characteristic scaling. No offset needed.
+        self.C_star = (data.max() if data.max() > 0 else 1.0) / 100.0
         self.input_dim = 4  # (x,y,z,t)
         self.char_domain = char_domain
         self.data = data / self.C_star
@@ -187,8 +189,8 @@ class DCEMRIDataModule(L.LightningDataModule):
         # Spatial points where mask == 1
         self.points = np.array(np.where(mask == 1)).T  # (num_points,3) integer indices
         self.num_points = self.points.shape[0]
-        # Normalize spatial coordinates axis-wise to [0,1]
-        self.points = self.points * self.char_domain.pixdim / self.char_domain.L_star
+        # Normalize spatial coordinates to [-1, 1]
+        self.points = (self.points * self.char_domain.pixdim - self.char_domain.L_offset) / self.char_domain.L_star
 
     # for testing instead of infer, we use half of data for training
     def setup(self, stage=None):

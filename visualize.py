@@ -6,14 +6,10 @@ from ipywidgets import interact
 from IPython.display import display
 
 # 1. visualize 3D velocity field quiver with interactive widget or window
-def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='bwr', normalize_vectors=False):
+def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='RdYlBu_r', normalize_vectors=False, ax=None):
     """
     Colored 3D quiver: arrow length + color encode speed magnitude.
-    Parameters
-      stride: subsampling step
-      length_scale: global scaling factor for arrows (after normalization)
-      cmap: matplotlib colormap (bwr gives blue->white->red)
-      normalize_vectors: if True all arrows same length; color still encodes magnitude
+    If ax is provided, update the existing axes instead of creating a new figure.
     """
     # Subsample
     Xs = X[::stride, ::stride, ::stride]
@@ -55,15 +51,16 @@ def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='bwr',
 
     colors = plt.get_cmap(cmap)(mag_norm)
 
-    fig = plt.figure(figsize=(9, 7))
-    ax = fig.add_subplot(111, projection='3d')
+    if ax is None:
+        fig = plt.figure(figsize=(9, 7))
+        ax = fig.add_subplot(111, projection='3d')
+    else:
+        fig = ax.figure
+        ax.clear()  # Clear the axes to redraw
 
-    # Matplotlib 3D quiver does not produce an easy colorbar; create a dummy scatter for colorbar
+    # Create scatter for colorbar (invisible, but used for color mapping)
     sc = ax.scatter(Xf, Yf, Zf, c=mag, cmap=cmap, alpha=0.0)
     q = ax.quiver(Xf, Yf, Zf, Uf, Vf, Wf, colors=colors, length=1.0, normalize=False)
-
-    cbar = fig.colorbar(sc, ax=ax, shrink=0.65, pad=0.1)
-    cbar.set_label('|v| (magnitude)')
 
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
@@ -71,23 +68,65 @@ def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='bwr',
     ax.set_title('Velocity Field (colored by |v|)')
     ax.set_box_aspect([1,1,1])
     plt.tight_layout()
-    plt.show()
-    return fig
+    if ax is None:
+        plt.show()
+    return fig, ax
 
-def interactive_quiver(vx, vy, vz, pixdim):
+def interactive_quiver(vx, vy, vz, pixdim, default_elev=None, default_azim=None):
+    """
+    Interactive 3D quiver plot with sliders.
+    Parameters:
+        vx, vy, vz: velocity components
+        pixdim: pixel dimensions for scaling
+        default_elev: default elevation angle (degrees)
+        default_azim: default azimuth angle (degrees)
+    """
     X, Y, Z = np.meshgrid(np.arange(vx.shape[0]), np.arange(vx.shape[1]), np.arange(vx.shape[2]), indexing='ij')
     X = X * pixdim[0]
     Y = Y * pixdim[1]
     Z = Z * pixdim[2]
 
+    # Create figure and axes once
+    fig, ax = plt.subplots(figsize=(9, 7), subplot_kw={'projection': '3d'})
+    cbar = None  # Will be added on first draw
+
     def _show(stride=3, length_scale=25, normalize_vectors=False):
-        plt.close('all')
+        nonlocal default_elev, default_azim
+        # Save current view angles (if any)
+        elev = ax.elev
+        azim = ax.azim
+        # Update the plot
         draw_3d_quiver(
             X, Y, Z, vx, vy, vz,
             stride=stride,
             length_scale=length_scale/100.0,
-            normalize_vectors=normalize_vectors
+            normalize_vectors=normalize_vectors,
+            ax=ax
         )
+
+        # Apply defaults if provided (overrides saved values)
+        if default_elev is not None:
+            elev = default_elev
+            default_elev = None  # Only apply once
+        if default_azim is not None:
+            azim = default_azim
+            default_azim = None  # Only apply once
+
+        # Restore/set view angles and zoom
+        ax.view_init(elev=elev, azim=azim)
+
+        # Add colorbar only once
+        nonlocal cbar
+        if cbar is None:
+            sc = ax.collections[0]  # The scatter artist from draw_3d_quiver
+            cbar = fig.colorbar(sc, ax=ax, shrink=0.65, pad=0.1)
+            cbar.set_label('|v| (magnitude)')
+
+        fig.canvas.draw_idle()
+
+        # Print current view/scale for extraction
+        # print(f"Current view: elev={ax.elev:.2f}, azim={ax.azim:.2f}")
+
     interact(
         _show,
         stride=widgets.IntSlider(min=1, max=10, step=1, value=3, description='Stride'),
@@ -95,6 +134,8 @@ def interactive_quiver(vx, vy, vz, pixdim):
         normalize_vectors=widgets.Checkbox(value=False, description='Uniform length')
     )
 
+    # Display the initial plot with defaults applied
+    _show()
 
 
 # 2. visualize the slices with mask + thresholding
@@ -142,13 +183,14 @@ def draw_nifti_slices_with_threshold(img, brain_mask=None):
 
 
 # draw nifti_slices, with a timeline slider instead of threshold
-def draw_nifti_slices_with_time(imgs, brain_mask=None, normalize='global', percentiles=(1, 99),
+def draw_nifti_slices_with_time(pred_imgs, gt_imgs=None, brain_mask=None, normalize='global', percentiles=(1, 99),
                                 cmap='gray', transpose_xy=True, overlay_cmap='autumn'):
     """
     Interactive viewer for 4D volume (x,y,z,t) with time, z, and threshold sliders.
 
     Parameters
-      imgs          : 4D numpy array (X,Y,Z,T)
+      pred_imgs          : 4D numpy array (X,Y,Z,T)
+      gt_imgs       : 4D numpy array (X,Y,Z,T) for ground truth
       brain_mask    : optional 3D boolean mask (X,Y,Z)
       normalize     : 'global' or 'per_time'
       percentiles   : (low, high) for intensity clipping
@@ -156,13 +198,21 @@ def draw_nifti_slices_with_time(imgs, brain_mask=None, normalize='global', perce
       transpose_xy  : transpose slice for display
       overlay_cmap  : colormap for threshold overlay
     """
-    assert imgs.ndim == 4, "imgs must be 4D (x,y,z,t)"
-    X, Y, Z, T = imgs.shape
-    data = imgs.astype(np.float32, copy=False)
 
+    # Now as predict images and gt images are x,y,z,t,
+    # with same z and t, we hstack (x,y) to form a bigger image
+    X, Y, Z, T = pred_imgs.shape
     if brain_mask is not None:
         assert brain_mask.shape == (X, Y, Z)
-        data = data * brain_mask[..., None]
+        pred_imgs = pred_imgs * brain_mask[..., None]
+    if gt_imgs is not None:
+        imgs = np.concatenate([gt_imgs, pred_imgs, np.abs(pred_imgs - gt_imgs)], axis=0)
+    else:
+        imgs = pred_imgs
+    X, Y, Z, T = imgs.shape
+    assert imgs.ndim == 4, "imgs must be 4D (x,y,z,t)"
+    
+    data = imgs.astype(np.float32, copy=False)
 
     finite_mask = np.isfinite(data)
     if not finite_mask.any():

@@ -3,13 +3,16 @@ from positional_encoding import PositionalEncoding_Geo, PositionalEncoding_GeoTi
 from torch import nn
 import torch
 
+# in ad_net there is nn to build advect-diffuse equation,
+# we train the equation as pde loss 
+# including a concentration network c_net and a velocity network v_net.
 
 class C_Net(nn.Module):
     def __init__(
         self,
         c_layers,
         positional_encoding=True,
-        domain_shape=(64, 64, 32, 10),
+        freq_nums = (8,8,8,0),
         gamma_space=1.0,
     ):
         super().__init__()
@@ -17,8 +20,8 @@ class C_Net(nn.Module):
         self.positional_encoding = positional_encoding
 
         if positional_encoding:
-            num_freq_space = np.array(domain_shape[:3]) // 3
-            num_freq_time = 0  # use fewer frequency for time dimension
+            num_freq_space = freq_nums[:3]
+            num_freq_time = freq_nums[3]
             # always include input as non periodic representation.
             c_pos_encoder = PositionalEncoding_GeoTime(
                 num_freq_space,
@@ -55,7 +58,7 @@ class V_Net(nn.Module):
         self,
         v_layers,
         positional_encoding=True,
-        domain_shape=(64, 64, 32, 10),
+        freq_nums=(8,8,8,0),
         incompressible=False,
         gamma_space=1.0,
     ):
@@ -65,7 +68,7 @@ class V_Net(nn.Module):
         self.incompressible = incompressible
 
         if positional_encoding:
-            num_freq_space = np.array(domain_shape[:3]) // 3
+            num_freq_space = np.array(freq_nums[:3])
             # always include input as non periodic representation.
             v_pos_encoder = PositionalEncoding_Geo(
                 num_freq_space, include_input=True, gamma_space=gamma_space
@@ -152,35 +155,61 @@ class AD_Net(nn.Module):
         self,
         c_layers,
         u_layers,
-        domain_shape,
+        char_domain,
+        freq_nums=(8,8,8,0),
         incompressible=False,
         positional_encoding=True,
         gamma_space=1.0,
     ):
         super().__init__()
+
+        freq_nums = np.array(freq_nums, dtype=int)
+        self.char_domain = char_domain
         self.c_net = C_Net(
-            c_layers, positional_encoding=positional_encoding, domain_shape=domain_shape, gamma_space=gamma_space
+            c_layers, positional_encoding=positional_encoding, 
+            freq_nums=freq_nums, gamma_space=gamma_space
         )
+
         self.v_net = V_Net(
             u_layers,
             positional_encoding=positional_encoding,
-            domain_shape=domain_shape,
+            freq_nums=freq_nums,
             incompressible=incompressible,
             gamma_space=gamma_space,
         )
 
         # define learnable diffusivity
-        self._D_raw = nn.Parameter(torch.log(torch.tensor(0.01)))
+        self._log_Pe = nn.Parameter(torch.log(torch.tensor(char_domain.Pe_g)))
+
+    @property
+    def Pe(self):
+        """Peclet number, representing the ratio of advection to diffusion."""
+        return torch.exp(self._log_Pe)
+
+    @property
+    def D_normalized(self):
+        return 1.0 / self.Pe
 
     @property
     def D(self):
-        return torch.exp(self._D_raw)
+        return self.D_normalized * (
+            self.char_domain.L_star.mean() * 
+            self.char_domain.V_star.mean())
 
     def forward(self, x):
         # x: (N,4) with (x,y,z,t) normalized to [0,1]
         c = self.c_net(x)
         vx, vy, vz = self.v_net(x)
         return c, vx, vy, vz
+
+    def c_t_smoothness_residual(self, x):
+        x = x.requires_grad_()
+        C_pred = self.c_net(x)
+        grad_C = torch.autograd.grad(
+            C_pred, x, grad_outputs=torch.ones_like(C_pred), create_graph=True
+        )[0]
+        C_t = grad_C[:, 3:4]
+        return (C_t **2).mean()
 
     def pde_residual(self, x):
         x = x.requires_grad_()
@@ -214,4 +243,6 @@ class AD_Net(nn.Module):
         C_zz = grad_C_z[:, 2:3]
 
         # Advection-diffusion equation residual
-        return C_t + vx * C_x + vy * C_y + vz * C_z - self.D * (C_xx + C_yy + C_zz)
+        advection = vx * C_x + vy * C_y + vz * C_z
+        diffusion = self.D_normalized * (C_xx + C_yy + C_zz)
+        return C_t + advection - diffusion
