@@ -1,58 +1,13 @@
+from modules.c_net import C_Net
 from modules.data_module import CharacteristicDomain
 import numpy as np
-from modules.positional_encoding import PositionalEncoding_Geo, PositionalEncoding_GeoTime
+from modules.positional_encoding import PositionalEncoding_Geo
 from torch import nn
 import torch
 
 # in ad_net there is nn to build advect-diffuse equation,
 # we train the equation as pde loss 
 # including a concentration network c_net and a velocity network v_net.
-
-class C_Net(nn.Module):
-    def __init__(
-        self,
-        c_layers,
-        positional_encoding=True,
-        freq_nums = (8,8,8,0),
-        gamma_space=1.0,
-    ):
-        super().__init__()
-        self.c_layers = c_layers
-        self.positional_encoding = positional_encoding
-
-        if positional_encoding:
-            num_freq_space = freq_nums[:3]
-            num_freq_time = freq_nums[3]
-            # always include input as non periodic representation.
-            c_pos_encoder = PositionalEncoding_GeoTime(
-                num_freq_space,
-                num_freq_time,
-                include_input=True,
-                gamma_space=gamma_space,
-            )
-            # update input layer size
-            c_layers[0] = 4 + num_freq_space.sum() * 2 + num_freq_time * 2
-
-        self.c_net = nn.Sequential()
-        if positional_encoding:
-            self.c_net.add_module("c_positional_encoding", c_pos_encoder)
-        self.c_net.add_module("c_input_layer", nn.Linear(c_layers[0], c_layers[1]))
-        self.c_net.add_module("c_input_activation", nn.Tanh())
-        for i in range(1, len(c_layers) - 2):
-            self.c_net.add_module(
-                f"c_hidden_layer_{i}", nn.Linear(c_layers[i], c_layers[i + 1])
-            )
-            self.c_net.add_module(f"c_hidden_activation_{i}", nn.Tanh())
-        self.c_net.add_module("c_output_layer", nn.Linear(c_layers[-2], c_layers[-1]))
-
-        for m in self.c_net.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_normal_(m.weight)
-                nn.init.zeros_(m.bias)
-
-    def forward(self, x):
-        return self.c_net(x)
-
 
 class V_Net(nn.Module):
     def __init__(
@@ -154,10 +109,12 @@ class V_Net(nn.Module):
 # advection-diffusion network
 class AD_Net(nn.Module):
     # accept dti (x,y,z,3,3) as input to compute anisotropic diffusion tensor
+    # data,mask,C_star is only for visualization inside c_net and v_net
     def __init__(
         self,
         c_layers,
         u_layers,
+        data,mask,C_star,
         char_domain : CharacteristicDomain,
         freq_nums=(8,8,8,0),
         incompressible=False,
@@ -170,7 +127,8 @@ class AD_Net(nn.Module):
         freq_nums = np.array(freq_nums, dtype=int)
         self.char_domain = char_domain
         self.c_net = C_Net(
-            c_layers, positional_encoding=positional_encoding, 
+            c_layers, data, mask, char_domain, C_star,
+            positional_encoding=positional_encoding,
             freq_nums=freq_nums, gamma_space=gamma_space
         )
 
@@ -181,9 +139,9 @@ class AD_Net(nn.Module):
             incompressible=incompressible,
             gamma_space=gamma_space,
         )
-        if DTI is not None:
-            self.DTI = torch.tensor(DTI, dtype=torch.float32).to(self.char_domain.device)
-
+        
+        self.DTI = torch.tensor(DTI, dtype=torch.float32).to(self.char_domain.device) \
+                    if DTI is not None else None
         # define learnable diffusivity
         self._log_Pe = nn.Parameter(torch.log(torch.tensor(char_domain.Pe_g)))
 
