@@ -143,7 +143,7 @@ class AD_Net(nn.Module):
         self.DTI = torch.tensor(DTI, dtype=torch.float32).to(self.char_domain.device) \
                     if DTI is not None else None
         # define learnable diffusivity
-        self._log_Pe = nn.Parameter(torch.log(torch.tensor(char_domain.Pe_g)))
+        self._log_Pe = nn.Parameter(torch.log(torch.tensor(char_domain.Pe_g if DTI is None else 1.0)))
 
     @property
     def Pe(self):

@@ -6,10 +6,13 @@ from ipywidgets import interact
 from IPython.display import display
 
 # 1. visualize 3D velocity field quiver with interactive widget or window
-def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='RdYlBu_r', normalize_vectors=False, ax=None):
+def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='RdYlBu_r', normalize_vectors=False, ax=None, show=True, return_mappable=False):
     """
     Colored 3D quiver: arrow length + color encode speed magnitude.
     If ax is provided, update the existing axes instead of creating a new figure.
+    Parameters
+      show: if True and a new figure is created (ax is None), call plt.show().
+      return_mappable: if True, also return a ScalarMappable for creating a colorbar (independent of artist alpha).
     """
     # Subsample
     Xs = X[::stride, ::stride, ::stride]
@@ -25,24 +28,21 @@ def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='RdYlB
 
     mag = np.sqrt(Uf**2 + Vf**2 + Wf**2)
     mag_min, mag_max = mag.min() if mag.size else 0.0, mag.max() if mag.size else 1.0
-    mag_rng = (mag_max - mag_min) if mag_max > mag_min else 1.0
-    mag_norm = (mag - mag_min) / mag_rng  # 0..1 for colormap
+    if mag_max <= mag_min:
+        mag_max = mag_min + 1.0
+    mag_norm = (mag - mag_min) / (mag_max - mag_min)  # 0..1 for colormap
 
     if normalize_vectors:
-        # Keep direction only, scale uniformly
         nonzero = mag > 0
         Uf[nonzero] /= mag[nonzero]
         Vf[nonzero] /= mag[nonzero]
         Wf[nonzero] /= mag[nonzero]
-        mag_for_length = np.ones_like(mag)
     else:
-        # Scale by magnitude
         max_m = mag.max() if mag.size else 1.0
         if max_m > 0:
             Uf /= max_m
             Vf /= max_m
             Wf /= max_m
-        mag_for_length = mag
 
     # Apply global length scale
     Uf *= length_scale
@@ -51,16 +51,17 @@ def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='RdYlB
 
     colors = plt.get_cmap(cmap)(mag_norm)
 
+    created_new_ax = False
     if ax is None:
         fig = plt.figure(figsize=(9, 7))
         ax = fig.add_subplot(111, projection='3d')
+        created_new_ax = True
     else:
         fig = ax.figure
-        ax.clear()  # Clear the axes to redraw
+        ax.clear()
 
-    # Create scatter for colorbar (invisible, but used for color mapping)
-    sc = ax.scatter(Xf, Yf, Zf, c=mag, cmap=cmap, alpha=0.0)
-    q = ax.quiver(Xf, Yf, Zf, Uf, Vf, Wf, colors=colors, length=1.0, normalize=False)
+    # Quiver (colored arrows)
+    ax.quiver(Xf, Yf, Zf, Uf, Vf, Wf, colors=colors, length=1.0, normalize=False)
 
     ax.set_xlabel('X')
     ax.set_ylabel('Y')
@@ -68,9 +69,18 @@ def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='RdYlB
     ax.set_title('Velocity Field (colored by |v|)')
     ax.set_box_aspect([1,1,1])
     plt.tight_layout()
-    if ax is None:
+
+    # Independent mappable for colorbar so alpha is not affected
+    if return_mappable:
+        norm = plt.Normalize(vmin=mag_min, vmax=mag_max)
+        mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+        mappable.set_array(mag)
+    else:
+        mappable = None
+
+    if created_new_ax and show:
         plt.show()
-    return fig, ax
+    return (fig, ax, mappable) if return_mappable else (fig, ax)
 
 def interactive_quiver(vx, vy, vz, pixdim, default_elev=None, default_azim=None):
     """
@@ -89,20 +99,25 @@ def interactive_quiver(vx, vy, vz, pixdim, default_elev=None, default_azim=None)
     # Create figure and axes once
     fig, ax = plt.subplots(figsize=(9, 7), subplot_kw={'projection': '3d'})
     cbar = None  # Will be added on first draw
+    stored_mappable = None
 
     def _show(stride=3, length_scale=25, normalize_vectors=False):
-        nonlocal default_elev, default_azim
+        nonlocal default_elev, default_azim, stored_mappable, cbar
         # Save current view angles (if any)
         elev = ax.elev
         azim = ax.azim
-        # Update the plot
-        draw_3d_quiver(
+        # Update the plot (request mappable)
+        fig_ret = draw_3d_quiver(
             X, Y, Z, vx, vy, vz,
             stride=stride,
             length_scale=length_scale/100.0,
             normalize_vectors=normalize_vectors,
-            ax=ax
+            ax=ax,
+            show=False,
+            return_mappable=True
         )
+        _, _, mappable = fig_ret
+        stored_mappable = mappable
 
         # Apply defaults if provided (overrides saved values)
         if default_elev is not None:
@@ -112,20 +127,15 @@ def interactive_quiver(vx, vy, vz, pixdim, default_elev=None, default_azim=None)
             azim = default_azim
             default_azim = None  # Only apply once
 
-        # Restore/set view angles and zoom
+        # Restore/set view angles
         ax.view_init(elev=elev, azim=azim)
 
         # Add colorbar only once
-        nonlocal cbar
-        if cbar is None:
-            sc = ax.collections[0]  # The scatter artist from draw_3d_quiver
-            cbar = fig.colorbar(sc, ax=ax, shrink=0.65, pad=0.1)
+        if cbar is None and stored_mappable is not None:
+            cbar = fig.colorbar(stored_mappable, ax=ax, shrink=0.65, pad=0.1)
             cbar.set_label('|v| (magnitude)')
 
         fig.canvas.draw_idle()
-
-        # Print current view/scale for extraction
-        # print(f"Current view: elev={ax.elev:.2f}, azim={ax.azim:.2f}")
 
     interact(
         _show,
@@ -314,3 +324,60 @@ def visualize_prediction_vs_groundtruth(pred_img, gt_img, vmin=0, vmax=1):
     # Clip values for visualization
     stacked = np.clip(stacked, vmin, vmax)
     return stacked
+
+# Add a fixed-view quiver exporter returning an RGB array
+def fixed_quiver_image(vx, vy, vz, pixdim, stride=2, length_scale=0.8, elev=-62.76, azim=-10.87,
+                       cmap='RdYlBu_r', normalize_vectors=False, figsize=(7, 6), dpi=100,
+                       add_colorbar=True, close_fig=True):
+    """
+    Render a 3D quiver plot at a fixed view and return it as an RGB (H,W,3) uint8 array.
+    Uses separate ScalarMappable so colorbar always shows colors.
+    """
+    X, Y, Z = np.meshgrid(np.arange(vx.shape[0]), np.arange(vx.shape[1]), np.arange(vx.shape[2]), indexing='ij')
+    X = X * pixdim[0]; Y = Y * pixdim[1]; Z = Z * pixdim[2]
+
+    fig = plt.figure(figsize=figsize, dpi=dpi)
+    ax = fig.add_subplot(111, projection='3d')
+
+    fig_ret = draw_3d_quiver(X, Y, Z, vx, vy, vz,
+                   stride=stride,
+                   length_scale=length_scale,
+                   cmap=cmap,
+                   normalize_vectors=normalize_vectors,
+                   ax=ax,
+                   show=False,
+                   return_mappable=True)
+    _, _, mappable = fig_ret
+
+    ax.view_init(elev=elev, azim=azim)
+
+    if add_colorbar and mappable is not None:
+        cb = fig.colorbar(mappable, ax=ax, shrink=0.65, pad=0.1)
+        cb.set_label('|v| (magnitude)')
+
+    # Robust figure-to-RGB extraction
+    rgb = None
+    try:
+        fig.canvas.draw()
+        if hasattr(fig.canvas, "tostring_rgb"):
+            w, h = fig.canvas.get_width_height()
+            buf = fig.canvas.tostring_rgb()
+            rgb = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 3)
+        elif hasattr(fig.canvas, "buffer_rgba"):
+            w, h = fig.canvas.get_width_height()
+            buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(h, w, 4)
+            rgb = buf[..., :3].copy()
+        else:
+            raise AttributeError("No direct RGB buffer method on canvas.")
+    except Exception:
+        import io
+        from PIL import Image
+        bio = io.BytesIO()
+        fig.savefig(bio, format='png', dpi=fig.dpi, bbox_inches='tight')
+        bio.seek(0)
+        rgb = np.array(Image.open(bio).convert("RGB"))
+
+    if close_fig:
+        plt.close(fig)
+
+    return rgb

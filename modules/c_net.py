@@ -1,7 +1,7 @@
 from modules.data_module import CharacteristicDomain
 import torch
 import torch.nn as nn
-import pytorch_lightning as L
+import lightning as L
 import numpy as np
 
 from modules.positional_encoding import PositionalEncoding_GeoTime
@@ -137,7 +137,7 @@ class Denoising_C_Pretrainer(L.LightningModule):
                 include_input=True,
                 gamma_space=gamma_space,
             )
-            mlp_input_dim = 4 + int(num_freq_space.sum()) * 2 + int(num_freq_time) * 2
+            mlp_input_dim = 4 + int(np.array(num_freq_space).sum()) * 2 + int(num_freq_time) * 2
         else:
             self.pos_encoder = None
             mlp_input_dim = input_dim
@@ -163,6 +163,8 @@ class Denoising_C_Pretrainer(L.LightningModule):
         # Optionally encode inputs once and share for both heads
         if self.pos_encoder is not None:
             txyz_freq = self.pos_encoder(txyz_coords)
+        else:
+            txyz_freq = txyz_coords
 
         # Predict the noise standard deviation using the paper's formulation
         # Equation A.12: sigma = 10 * sigmoid(NN_noise) + sigma_0
