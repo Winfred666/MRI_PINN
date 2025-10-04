@@ -111,29 +111,19 @@ class C_Net(nn.Module):
 
 
 class Denoising_C_Pretrainer(L.LightningModule):
-    def __init__(self, c_net : C_Net, input_dim=4, lr=1e-3, freq_nums=(8,8,8,0), gamma_space=1.0):
-        """
-        Args:
-            input_dim: 4 (for t, x, y, z)
-            c_net: concentration network to be pre-train
-            data: only for validation visualization
-            lr: learning rate
-            positional_encoding: only setting to noise network
-            freq_nums: (fx, fy, fz, ft) frequencies, also only setting to noise network
-            gamma_space: spatial scaling for positional encoding, only setting to noise network
-        """
+    def __init__(self, c_net: C_Net, input_dim=4, lr=1e-3, freq_nums=(8,8,8,0), gamma_space=1.0,
+                 correct_nll: bool = True,
+                 detach_sigma_for_c: bool = False,
+                 warmup_freeze_c_epochs: int = 50,
+                 sigma_reg_weight: float = 0.01):
         super().__init__()
         self.save_hyperparameters()
-
-        # Positional encoding setup (shared for both heads)
         self.positional_encoding = c_net.positional_encoding
-        # frequency of noise could be higher than that of clean signal
         if self.positional_encoding:
             num_freq_space = freq_nums[:3]
             num_freq_time = freq_nums[3]
             self.pos_encoder = PositionalEncoding_GeoTime(
-                num_freq_space,
-                num_freq_time,
+                num_freq_space, num_freq_time,
                 include_input=True,
                 gamma_space=gamma_space,
             )
@@ -143,69 +133,82 @@ class Denoising_C_Pretrainer(L.LightningModule):
             mlp_input_dim = input_dim
         self.c_net = c_net
 
-        # Network for the noise standard deviation (sigma)
-        # Output is 1 because we predict a single sigma value per point
         self.nn_noise = MLP(
             input_dim=mlp_input_dim,
             output_dim=1,
-            hidden_layers=5,
-            hidden_features=66 # From Table D.8
+            hidden_layers=5, # from Table D.8
+            hidden_features=66
         )
 
     def forward(self, txyz_coords):
-        """
-        A forward pass returns both the clean signal and the predicted noise.
-        """
-        
-        # Predict the clean concentration
         c_clean_pred = self.c_net(txyz_coords)
-
-        # Optionally encode inputs once and share for both heads
         if self.pos_encoder is not None:
             txyz_freq = self.pos_encoder(txyz_coords)
         else:
             txyz_freq = txyz_coords
-
-        # Predict the noise standard deviation using the paper's formulation
-        # Equation A.12: sigma = 10 * sigmoid(NN_noise) + sigma_0
         sigma_0 = 0.01
-        
-        # We use sigmoid to bound the output of nn_noise between 0 and 1
         predicted_sigma = 10.0 * torch.sigmoid(self.nn_noise(txyz_freq)) + sigma_0
-        
         return c_clean_pred, predicted_sigma
 
-    def nll_loss(self, c_observed, c_clean_pred, sigma_pred):
+    def nll_loss(self, c_observed, c_pred, sigma_pred):
         """
-        Calculates the Negative Log-Likelihood loss as per Equation A.14.
+        Gaussian NLL (up to constant): log σ + (err^2)/(2 σ^2)
+        If correct_nll=False fallback to previous (log σ^2 + err^2/(2 σ^2)).
         """
-        # The paper uses a simplified NLL for a Gaussian distribution
-        # Term 1: log(sigma^2)
-        log_variance = torch.log(sigma_pred.pow(2))
-        
-        # Term 2: (observed - predicted)^2 / (2 * sigma^2)
-        squared_error = (c_observed - c_clean_pred).pow(2)
-        error_term = squared_error / (2 * sigma_pred.pow(2))
+        err = c_observed - c_pred
+        eps = 1e-8
+        if self.hparams.correct_nll:
+            log_term = torch.log(sigma_pred + eps)           # log σ
+            quad_term = (err.pow(2)) / (2.0 * (sigma_pred.pow(2) + eps))
+            base = log_term + quad_term
+        else:
+            log_term = torch.log(sigma_pred.pow(2) + eps)    # log σ^2 (old)
+            quad_term = (err.pow(2)) / (2.0 * (sigma_pred.pow(2) + eps))
+            base = log_term + quad_term
 
-        # We are ignoring the constant C_o from the paper as it doesn't affect optimization
-        loss = log_variance + error_term
-        
-        return loss.mean()
+        # Optional regularizer: encourage sigma^2 ≈ err^2 (optimal for true NLL)
+        if self.hparams.sigma_reg_weight > 0:
+            target = err.pow(2) + eps
+            reg = (torch.log(sigma_pred.pow(2) + eps) - torch.log(target)).pow(2)
+            base = base + self.hparams.sigma_reg_weight * reg
+
+        return base.mean()
+
+    def on_train_start(self):
+        # Optionally freeze c_net for warmup
+        if self.hparams.warmup_freeze_c_epochs > 0:
+            for p in self.c_net.parameters():
+                p.requires_grad = False
+
+    def on_train_epoch_start(self):
+        # Unfreeze after warmup
+        if (self.hparams.warmup_freeze_c_epochs > 0 and
+                self.current_epoch == self.hparams.warmup_freeze_c_epochs):
+            for p in self.c_net.parameters():
+                p.requires_grad = True
 
     def training_step(self, batch, batch_idx):
-        # The batch should contain the coordinates and the observed (noisy) concentration
         txyz_coords, c_observed = batch
-        
-        # Get predictions from the model
         c_clean_pred, sigma_pred = self(txyz_coords)
 
-        # Calculate the NLL loss
-        loss = self.nll_loss(c_observed, c_clean_pred, sigma_pred)
+        if self.hparams.detach_sigma_for_c:
+            # Two-part loss: NLL for sigma net, MSE (weighted by stopped sigma) for c_net
+            # 1. sigma branch
+            loss_sigma = self.nll_loss(c_observed.detach(), c_clean_pred.detach(), sigma_pred)
+            # 2. c branch
+            eps = 1e-8
+            sigma_det = sigma_pred.detach()
+            mse_weighted = ((c_observed - c_clean_pred).pow(2) / (sigma_det.pow(2) + eps)).mean()
+            loss = loss_sigma + mse_weighted
+            self.log("train_loss_sigma", loss_sigma, prog_bar=False)
+            self.log("train_loss_c_weighted", mse_weighted, prog_bar=False)
+        else:
+            loss = self.nll_loss(c_observed, c_clean_pred, sigma_pred)
 
-        # Log metrics for monitoring
         self.log("train_loss", loss, prog_bar=True)
-        self.log("predicted_sigma_mean", sigma_pred.mean())
-        
+        self.log("sigma_mean", sigma_pred.mean())
+        self.log("sigma_min", sigma_pred.min())
+        self.log("sigma_max", sigma_pred.max())
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -213,13 +216,13 @@ class Denoising_C_Pretrainer(L.LightningModule):
         c_clean_pred, sigma_pred = self(txyz_coords)
         loss = self.nll_loss(c_observed, c_clean_pred, sigma_pred)
         if batch_idx == 0:
-            self.log("val_loss", loss)
+            self.log("val_data_loss", loss, prog_bar=True)
+            self.log("val_sigma_mean", sigma_pred.mean())
             if self.current_epoch % 50 == 0:
                 c_vis_list = self.c_net.draw_concentration_slices()
-                self.logger.experiment.add_image('val_C_compare', c_vis_list, self.current_epoch, dataformats='WH')
-                # also draw noise's
+                # 2D image: use 'HW'
+                self.logger.experiment.add_image('val_C_compare', c_vis_list, self.current_epoch, dataformats='HW')
+        return loss
 
     def configure_optimizers(self):
-        # We optimize both networks together using a single optimizer
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
-        return optimizer
+        return torch.optim.Adam(self.parameters(), lr=self.hparams.lr)

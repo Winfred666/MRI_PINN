@@ -326,9 +326,9 @@ def visualize_prediction_vs_groundtruth(pred_img, gt_img, vmin=0, vmax=1):
     return stacked
 
 # Add a fixed-view quiver exporter returning an RGB array
-def fixed_quiver_image(vx, vy, vz, pixdim, stride=2, length_scale=0.8, elev=-62.76, azim=-10.87,
+def fixed_quiver_image(vx, vy, vz, pixdim, stride=3, length_scale=0.8, elev=-72.76, azim=-10.87,
                        cmap='RdYlBu_r', normalize_vectors=False, figsize=(7, 6), dpi=100,
-                       add_colorbar=True, close_fig=True):
+                       add_colorbar=True, close_fig=True, zoom=1.25):
     """
     Render a 3D quiver plot at a fixed view and return it as an RGB (H,W,3) uint8 array.
     Uses separate ScalarMappable so colorbar always shows colors.
@@ -350,6 +350,31 @@ def fixed_quiver_image(vx, vy, vz, pixdim, stride=2, length_scale=0.8, elev=-62.
     _, _, mappable = fig_ret
 
     ax.view_init(elev=elev, azim=azim)
+
+
+
+        # Simulated zoom via axis limits
+    if zoom > 1.0:
+        # Determine center in voxel indices
+        cx = (vx.shape[0]-1)/2.0
+        cy = (vy.shape[1]-1)/2.0 if vx.ndim == 3 else (vx.shape[1]-1)/2.0
+        cz = (vz.shape[2]-1)/2.0
+        # Original physical spans
+        x_full = (vx.shape[0]-1)*pixdim[0]
+        y_full = (vy.shape[1]-1)*pixdim[1]
+        z_full = (vz.shape[2]-1)*pixdim[2]
+        # Enforce a minimum fraction of span
+        frac = 1.0/zoom
+        x_half = 0.5 * x_full * frac
+        y_half = 0.5 * y_full * frac
+        z_half = 0.5 * z_full * frac
+        cxp = cx * pixdim[0]
+        cyp = cy * pixdim[1]
+        czp = cz * pixdim[2]
+        ax.set_xlim(max(0, cxp - x_half), min(x_full, cxp + x_half))
+        ax.set_ylim(max(0, cyp - y_half), min(y_full, cyp + y_half))
+        ax.set_zlim(max(0, czp - z_half), min(z_full, czp + z_half))
+
 
     if add_colorbar and mappable is not None:
         cb = fig.colorbar(mappable, ax=ax, shrink=0.65, pad=0.1)

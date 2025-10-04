@@ -2,6 +2,8 @@ import numpy as np
 from modules.positional_encoding import PositionalEncoding_Geo
 from torch import nn
 import torch
+from modules.c_net import MLP  # Import MLP from c_net.py
+
 # in dc_net there is nn to build Darcy's law equation.
 
 # we hard constrain the equation
@@ -12,17 +14,8 @@ class K_Net(nn.Module):
         super(K_Net, self).__init__()
         self.pos_encoder = PositionalEncoding_Geo(positional_encode_nums, position_encode_freq_scale)
         in_dim = sum([n*2 for n in positional_encode_nums]) + len(positional_encode_nums)
-        layers = []
-        layers.append(nn.Linear(in_dim, neuron_num))
-        layers.append(nn.Tanh())
-        for i in range(hid_layer_num):
-            layers.append(nn.Linear(neuron_num, neuron_num))
-            layers.append(nn.Tanh())
-        if anisotropic:
-            layers.append(nn.Linear(neuron_num, 3))  # kx,ky,kz
-        else:
-            layers.append(nn.Linear(neuron_num, 1))  # k isotropic
-        self.k_net = nn.Sequential(*layers)
+        out_dim = 3 if anisotropic else 1
+        self.k_net = MLP(input_dim=in_dim, output_dim=out_dim, hidden_layers=hid_layer_num, hidden_features=neuron_num)
         self.anisotropic = anisotropic
 
     def forward(self, x):
@@ -44,14 +37,7 @@ class P_Net(nn.Module):
         super(P_Net, self).__init__()
         self.pos_encoder = PositionalEncoding_Geo(positional_encode_nums, position_encode_freq_scale)
         in_dim = sum([n*2 for n in positional_encode_nums]) + len(positional_encode_nums)
-        layers = []
-        layers.append(nn.Linear(in_dim, neuron_num))
-        layers.append(nn.Tanh())
-        for i in range(hid_layer_num):
-            layers.append(nn.Linear(neuron_num, neuron_num))
-            layers.append(nn.Tanh())
-        layers.append(nn.Linear(neuron_num, 1))  # p
-        self.p_net = nn.Sequential(*layers)
+        self.p_net = MLP(input_dim=in_dim, output_dim=1, hidden_layers=hid_layer_num, hidden_features=neuron_num)
 
     def forward(self, x):
         # x: (x,y,z)
@@ -60,7 +46,7 @@ class P_Net(nn.Module):
         return p
 
 class DC_Net(nn.Module):
-    # Darcy's law network, including k_net and p_net 
+    # Darcy's law network, including k_net and p_net
     # and synthetic velocity calculation
     def __init__(self, neuron_num, hid_layer_num, positional_encode_nums, position_encode_freq_scale, anisotropic=True):
         super(DC_Net, self).__init__()
