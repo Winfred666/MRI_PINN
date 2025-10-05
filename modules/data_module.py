@@ -5,10 +5,11 @@ import lightning as L
 
 class CharacteristicDomain():
     # domain_shape is (x,y,z,t) shape of data
-    def __init__(self, domain_shape, t, pixdim, device="cpu",D_mean = 1e-4):
+    def __init__(self, domain_shape, mask, t, pixdim, device="cpu"):
         self.pixdim = pixdim
         self._pixdim_tensor = torch.tensor(self.pixdim, dtype=torch.float32).to(device)
         self.domain_shape = domain_shape # (nx,ny,nz,nt)
+        self.mask = mask # A global mask for control volume, shape (nx,ny,nz) bool.
         self.device = device
 
         # Spatial normalization to [-1, 1]
@@ -28,8 +29,16 @@ class CharacteristicDomain():
 
         self.V_star = self.L_star / self.T_star  # characteristic velocity in grid/unit time
 
-        self.Pe_g = self.V_star.mean() * self.L_star.mean() / D_mean  # global Peclet number
-    
+
+    def set_DTI_or_coef(self, DTI_or_coef):
+        # if we already using DTI, then we should set Pe = 1.0
+        self.Pe_g = self.V_star.mean() * self.L_star.mean() / (DTI_or_coef if isinstance(DTI_or_coef, float) else 1.0)  # global Peclet number
+        # for better leverage 
+        self.DTI_or_coef = torch.tensor(DTI_or_coef, dtype=torch.float32).to(self.device) # either a float (isotropic coeff) tensor or a (nx,ny,nz,3,3) tensor
+        if not isinstance(DTI_or_coef, float):
+            self.DTI_or_coef = self.DTI_or_coef.permute(3, 4, 0, 1, 2).reshape(1, 9, *self.DTI_or_coef.shape[0:3]) # shape: (1, 9, Nx, Ny, Nz)
+
+    # X that feed in PINN is already from [-1, 1], so 
     # also provide method to recover characteristic length and time scale to real world units
     def recover_length_tensor(self, L_normalized):
         L_real = L_normalized * self._L_star_tensor + self._L_offset_tensor
@@ -122,18 +131,42 @@ class CharacteristicDomain():
         return vol
 
 
-class VelocityDataModule(L.LightningDataModule):
+class RBAResampleDataModule(L.LightningDataModule):
+    def __init__(self, ):
+        super().__init__()
+        self.rba_model = None
+        self.num_train_points = 0
+
+    # the model must be instance of Net_RBAResample
+    def set_RBA_resample_model(self, rba_model):
+        self.rba_model = rba_model
+
+class MultiInputDataset(torch.utils.data.Dataset):
+    def __init__(self, X_list, train_indices, C):
+        self.X_list = X_list
+        self.train_indices = train_indices
+        self.C = C
+
+    def __len__(self):
+        return self.C.shape[0]
+
+    def __getitem__(self, idx):
+        return [X[idx] for X in self.X_list], self.train_indices[idx], self.C[idx]
+
+class VelocityDataModule(RBAResampleDataModule):
     # velocity is (x,y,z,3) numpy array, unit in grid/min
-    def __init__(self, velocity, char_domain, mask, batch_size=1024, device="cpu"):
+    def __init__(self, velocity, char_domain, batch_size=1024, num_workers=8, device="cpu"):
         super().__init__()
         self.input_dim = 3  # (x,y,z)
         # convert to normalized unit
         self.velocity = velocity * (char_domain.pixdim / char_domain.V_star)
         self.batch_size = batch_size
+
+        self.num_workers = num_workers
         self.device = device
 
-        self.points = np.array(np.where(mask == 1)).T  # (num_points,3) integer indices
-        self.num_points = self.points.shape[0]
+        self.points = np.array(np.where(char_domain.mask == 1)).T  # (num_points,3) integer indices
+        self.num_train_points = self.num_points = self.points.shape[0]
         self.points = self.points * char_domain.pixdim / char_domain.L_star  # normalize to [0,1]
 
     def setup(self, stage=None):
@@ -143,73 +176,97 @@ class VelocityDataModule(L.LightningDataModule):
                                 self.points[:, 2].astype(int)]
         self.V_train = torch.tensor(V_train, dtype=torch.float32)
         self.X_train = torch.tensor(self.points, dtype=torch.float32)
+        self.X_train_indice = torch.arange(self.num_points, dtype=torch.long)
     
     def train_dataloader(self):
-        ds = torch.utils.data.TensorDataset(self.X_train, self.V_train)
+        ds = torch.utils.data.TensorDataset(self.X_train, self.X_train_indice, self.V_train)
         return torch.utils.data.DataLoader(
             ds,
             batch_size=self.batch_size,
             shuffle=True,
-            num_workers=8,          # for safety of notebook and widget
-            persistent_workers=True
+            num_workers=self.num_workers,          # for safety of notebook and widget
+            persistent_workers=True,
         )
         
-
-class DCEMRIDataModule(L.LightningDataModule):
-    def __init__(self, data, char_domain, mask, batch_size=1024, device="cpu"):
+# receive lightning module and sample with weight instead of uniform
+class DCEMRIDataModule(RBAResampleDataModule):
+    def __init__(self, data, char_domain, batch_size=1024, num_workers=8, device="cpu"):
         super().__init__()
         # Normalize output C to [0, 100.0] as characteristic scaling. No offset needed.
         self.C_star = (data.max() if data.max() > 0 else 1.0) / 100.0
         self.input_dim = 4  # (x,y,z,t)
         self.char_domain = char_domain
         self.data = data / self.C_star
+        self.num_workers = num_workers
 
-        self.mask = mask
         self.device = device
         self.batch_size = batch_size
 
         # Spatial points where mask == 1
-        self.points = np.array(np.where(mask == 1)).T  # (num_points,3) integer indices
+        self.points = np.array(np.where(char_domain.mask == 1)).T  # (num_points,3) integer indices
         self.num_points = self.points.shape[0]
         # Normalize spatial coordinates to [-1, 1]
         self.points = (self.points * self.char_domain.pixdim - self.char_domain.L_offset) / self.char_domain.L_star
 
+        self.rba_model = None # to be set later
+
     # for testing instead of infer, we use half of data for training
     def setup(self, stage=None):
-        X_train_list, C_train_list = [], []
-        X_val_list, C_val_list = [], []
+        # split x, y, z and t so that we can do seperate grad.
+        X_train_list, C_train_list = ([],[]), []
+        X_train_indice_list, X_val_indice_list = [], []
+        
+        X_val_list, C_val_list = ([],[]) , []
         # Deterministic even/odd split (consider random for production)
         for i, ti in enumerate(self.char_domain.t_normalized):
-            Ci = self.data[:, :, :, i][self.mask == 1]
+            Ci = self.data[:, :, :, i][self.char_domain.mask == 1]
             ti_array = np.full((self.num_points, 1), ti, dtype=np.float32)
-            Xi = np.hstack((self.points, ti_array))
             if i % 2 == 0:
-                X_train_list.append(Xi)
-                C_train_list.append(Ci.reshape(-1, 1))
+                X_train_list[0].append(self.points)  # x, y, z
+                X_train_list[1].append(ti_array)  # t
+                C_train_list.append(Ci.reshape(-1, 1))  # reshape to (num_points,1)
+                # warning: RBA is only for spatial points
+                X_train_indice_list.append(np.arange(self.num_points))
             else:
-                X_val_list.append(Xi)
+                X_val_list[0].append(self.points)  # x, y, z
+                X_val_list[1].append(ti_array)  # t
                 C_val_list.append(Ci.reshape(-1, 1))
-        self.X_train = torch.tensor(np.vstack(X_train_list), dtype=torch.float32)
+
+                X_val_indice_list.append(np.arange(self.num_points))
+
+        self.X_train = [torch.tensor(np.vstack(X_train_list[i]), dtype=torch.float32) for i in range(2)]
+        self.num_train_points = self.X_train[0].shape[0]
+        self.X_train_indice = torch.tensor(np.hstack(X_train_indice_list), dtype=torch.long) # (num_points,)
         self.C_train = torch.tensor(np.vstack(C_train_list), dtype=torch.float32)
-        self.X_val = torch.tensor(np.vstack(X_val_list), dtype=torch.float32)
+
+        self.X_val = [torch.tensor(np.vstack(X_val_list[i]), dtype=torch.float32) for i in range(2)]
+        self.X_val_indice = torch.tensor(np.hstack(X_val_indice_list), dtype=torch.long)  # (num_points,)
         self.C_val = torch.tensor(np.vstack(C_val_list), dtype=torch.float32)
 
+    # WARNING: compared to validation dataloader, training provide point_indice, 
+    # to allow RBA weight calculation for each point
     def train_dataloader(self):
-        ds = torch.utils.data.TensorDataset(self.X_train, self.C_train)
+        ds = MultiInputDataset(self.X_train, self.X_train_indice, self.C_train)
+        sampler = None if self.rba_model is None else torch.utils.data.WeightedRandomSampler(
+            weights=self.rba_model.get_sample_prob_weight(),
+            num_samples=self.num_train_points, # still sample all points.
+            replacement=True
+        )
         return torch.utils.data.DataLoader(
             ds,
             batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=8,          # for safety of notebook and widget
-            persistent_workers=True
+            shuffle=True if self.rba_model is None else None,
+            num_workers=self.num_workers,          # for safety of notebook and widget
+            persistent_workers=True,
+            sampler=sampler
         )
 
     def val_dataloader(self):
-        ds = torch.utils.data.TensorDataset(self.X_val, self.C_val)
+        ds = MultiInputDataset(self.X_val, self.X_val_indice, self.C_val)
         return torch.utils.data.DataLoader(
             ds,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=8,
+            num_workers=self.num_workers,
             persistent_workers=True
         )

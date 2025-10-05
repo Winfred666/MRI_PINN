@@ -47,10 +47,10 @@ class PositionalEncoding_Geo(nn.Module):
         self.register_buffer("scale_y", torch.tensor(sy, dtype=torch.float32))
         self.register_buffer("scale_z", torch.tensor(sz, dtype=torch.float32))
 
-    def forward(self, X):
+    def forward(self, X_train):
         # X: (N,3) with (x,y,z) normalized to [0,1] (outputs are in [-1,1])
-        x, y, z = X[:, 0:1], X[:, 1:2], X[:, 2:3]
-        out = [X] if self.include_input else []
+        x, y, z = X_train[:, 0:1], X_train[:, 1:2], X_train[:, 2:3]
+        out = [X_train] if self.include_input else []
 
         if self.freq_x.numel() > 0:
             sx = x * self.freq_x  # (N, Fx)
@@ -64,7 +64,7 @@ class PositionalEncoding_Geo(nn.Module):
             sz = z * self.freq_z
             out.append(self.scale_z * torch.sin(sz))
             out.append(self.scale_z * torch.cos(sz))
-        return torch.cat(out, dim=-1) if len(out) > 0 else X
+        return torch.cat(out, dim=-1) if len(out) > 0 else X_train
 
 class PositionalEncoding_GeoTime(nn.Module):
     def __init__(self,
@@ -99,10 +99,11 @@ class PositionalEncoding_GeoTime(nn.Module):
         self.register_buffer("scale_z", torch.tensor(sz, dtype=torch.float32))
         self.register_buffer("scale_t", torch.tensor(st, dtype=torch.float32))
 
-    def forward(self, X):
+    def forward(self, X_train):
+        # print(X_train.shape)
         # X: (N,4) with (x,y,z,t) normalized to [0,1]
-        x, y, z, t = X[:, 0:1], X[:, 1:2], X[:, 2:3], X[:, 3:4]
-        out = [X] if self.include_input else []
+        x, y, z, t = X_train[:, 0:1], X_train[:, 1:2], X_train[:, 2:3], X_train[:, 3:4]
+        out = [X_train] if self.include_input else []
 
         if self.freq_x.numel() > 0:
             sx = x * self.freq_x
@@ -116,4 +117,4 @@ class PositionalEncoding_GeoTime(nn.Module):
         if self.freq_t.numel() > 0:
             st = t * self.freq_t
             out.append(self.scale_t * torch.sin(st)); out.append(self.scale_t * torch.cos(st))
-        return torch.cat(out, dim=-1) if len(out) > 0 else X
+        return torch.cat(out, dim=-1) if len(out) > 0 else X_train

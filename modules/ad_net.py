@@ -4,6 +4,8 @@ import numpy as np
 from modules.positional_encoding import PositionalEncoding_Geo
 from torch import nn
 import torch
+from utils.visualize import fixed_quiver_image  # added import
+
 
 # in ad_net there is nn to build advect-diffuse equation,
 # we train the equation as pde loss 
@@ -13,6 +15,7 @@ class V_Net(nn.Module):
     def __init__(
         self,
         v_layers,
+        char_domain: CharacteristicDomain,
         positional_encoding=True,
         freq_nums=(8,8,8,0),
         incompressible=False,
@@ -22,10 +25,12 @@ class V_Net(nn.Module):
         self.v_layers = v_layers
         self.positional_encoding = positional_encoding
         self.incompressible = incompressible
+        self.char_domain = char_domain
+        # precompute spatial grid (Nxyz,3)
+        self.grid_tensor = char_domain.get_characteristic_geodomain().to(torch.float32)
 
         if positional_encoding:
             num_freq_space = np.array(freq_nums[:3])
-            # always include input as non periodic representation.
             v_pos_encoder = PositionalEncoding_Geo(
                 num_freq_space, include_input=True, gamma_space=gamma_space
             )
@@ -100,60 +105,78 @@ class V_Net(nn.Module):
                     create_graph=True,
                 )[0]
             )
+            vx, vy, vz = vx.unsqueeze(1), vy.unsqueeze(1), vz.unsqueeze(1)
         else:
             v = self.v_net_raw(x_spatial)
             vx, vy, vz = v[:, 0:1], v[:, 1:2], v[:, 2:3]
         return vx, vy, vz
 
+    def draw_velocity_volume(self):
+        """
+        mask: (nx, ny, nz) using that in char_domain
+        pixdim: voxel spacing (3,) for physical quiver scaling
+        """
+        mask_np = self.char_domain.mask
+        data_shape = self.char_domain.domain_shape[:3]
+        nx, ny, nz = data_shape[0], data_shape[1], data_shape[2]
+        with torch.no_grad():
+            grid = self.grid_tensor.to(next(self.v_net_raw.parameters()).device)
+            vx, vy, vz = self.forward(grid)
+            vx = vx.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[0] * mask_np
+            vy = vy.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[1] * mask_np
+            vz = vz.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[2] * mask_np
+            rgb_img = fixed_quiver_image(vx, vy, vz, self.char_domain.pixdim)
+            return rgb_img, vx, vy, vz
+
 
 # advection-diffusion network
 class AD_Net(nn.Module):
     # accept dti (x,y,z,3,3) as input to compute anisotropic diffusion tensor
-    # data,mask,C_star is only for visualization inside c_net and v_net
+    # data,C_star is only for visualization inside c_net and v_net
     def __init__(
         self,
         c_layers,
         u_layers,
-        data,mask,C_star,
+        data,C_star,
         char_domain : CharacteristicDomain,
         freq_nums=(8,8,8,0),
         incompressible=False,
         positional_encoding=True,
         gamma_space=1.0,
-        DTI=None
     ):
         super().__init__()
 
         freq_nums = np.array(freq_nums, dtype=int)
-        self.char_domain = char_domain
+        self.char_domain = char_domain  # store for D computation
+
         self.c_net = C_Net(
-            c_layers, data, mask, char_domain, C_star,
+            c_layers, data, char_domain, C_star,
             positional_encoding=positional_encoding,
             freq_nums=freq_nums, gamma_space=gamma_space
         )
 
         self.v_net = V_Net(
             u_layers,
+            char_domain,
             positional_encoding=positional_encoding,
             freq_nums=freq_nums,
             incompressible=incompressible,
             gamma_space=gamma_space,
         )
-        
-        self.DTI = torch.tensor(DTI, dtype=torch.float32).to(self.char_domain.device) \
-                    if DTI is not None else None
         # define learnable diffusivity
-        self._log_Pe = nn.Parameter(torch.log(torch.tensor(char_domain.Pe_g if DTI is None else 1.0)))
+        self._log_Pe = nn.Parameter(torch.log(torch.tensor(char_domain.Pe_g)))
 
     @property
     def Pe(self):
         """Peclet number, representing the ratio of advection to diffusion."""
         return torch.exp(self._log_Pe)
 
+    # used for learning
     @property
     def D_normalized(self):
         return 1.0 / self.Pe
-
+    
+    # used for visualization and result showing.
     @property
     def D(self):
         return self.D_normalized * (
@@ -166,61 +189,25 @@ class AD_Net(nn.Module):
         vx, vy, vz = self.v_net(x)
         return c, vx, vy, vz
 
-    def c_t_smoothness_residual(self, x):
-        x = x.requires_grad_()
-        C_pred = self.c_net(x)
-        grad_C = torch.autograd.grad(
-            C_pred, x, grad_outputs=torch.ones_like(C_pred), create_graph=True
+    def c_t_smoothness_residual(self, Xt, provided_pred_c=None):
+        _, t = Xt
+        t.requires_grad_(True)
+        if provided_pred_c is None:
+            C_pred = self.c_net(torch.cat(Xt, dim=1))
+        else:
+            C_pred = provided_pred_c
+        c_t = torch.autograd.grad(
+            C_pred, t, grad_outputs=torch.ones_like(C_pred), create_graph=True
         )[0]
-        C_t = grad_C[:, 3:4]
-        return (C_t **2).mean()
+        return (c_t **2).mean()
 
-    def pde_residual(self, x):
-        x = x.requires_grad_()
-        C_pred, vx, vy, vz = self.forward(x)
-
-        # Compute gradients of density
-        grad_C = torch.autograd.grad(
-            C_pred, x, grad_outputs=torch.ones_like(C_pred), create_graph=True
-        )[0]
-
+    def pde_residual(self, Xt):
+        vx, vy, vz = self.v_net(torch.cat(Xt, dim=1))
         # When DTI is not known, apply anisotropic diffusion on grad_C for every timestep
-        if self.DTI is not None:
-            # x is normalized to [-1,1], need to scale back to index space
-            idx = (self.char_domain.recover_length_tensor(x[:, :3]) / self.char_domain._pixdim_tensor).int()
-            # safeguard for out-of-bound index
-            idx_x = torch.clamp(idx[:, 0], min=0, max=torch.tensor(self.DTI.shape[0]-1, device=idx.device))
-            idx_y = torch.clamp(idx[:, 1], min=0, max=torch.tensor(self.DTI.shape[1]-1, device=idx.device))
-            idx_z = torch.clamp(idx[:, 2], min=0, max=torch.tensor(self.DTI.shape[2]-1, device=idx.device))
-            D_tensor = self.DTI[idx_x, idx_y, idx_z, :, :]  # (N,3,3), where index_3 is used to gather the correct DTI values
-            grad_C_spatial = grad_C[:, :3].unsqueeze(-1)  # (N,3,1)
-            diff_flux = torch.bmm(D_tensor, grad_C_spatial).squeeze(-1)  # (N,3)
-            grad_C = torch.cat([diff_flux, grad_C[:, 3:4]], dim=1)  # (N,4)
-
-        C_x, C_y, C_z, C_t = (
-            grad_C[:, 0:1],
-            grad_C[:, 1:2],
-            grad_C[:, 2:3],
-            grad_C[:, 3:4],
-        )
-
-        # Second derivatives
-        grad_C_x = torch.autograd.grad(
-            C_x, x, grad_outputs=torch.ones_like(C_x), create_graph=True
-        )[0]
-        C_xx = grad_C_x[:, 0:1]
-
-        grad_C_y = torch.autograd.grad(
-            C_y, x, grad_outputs=torch.ones_like(C_y), create_graph=True
-        )[0]
-        C_yy = grad_C_y[:, 1:2]
-
-        grad_C_z = torch.autograd.grad(
-            C_z, x, grad_outputs=torch.ones_like(C_z), create_graph=True
-        )[0]
-        C_zz = grad_C_z[:, 2:3]
-
+        # provide learnable param char_domain.DTI_or_coef, cannot provide c as must be computed inside
+        DTI_or_coef =  self.D_normalized * self.char_domain.DTI_or_coef
+        c_X, c_t, c_diffusion = self.c_net.get_c_grad_ani_diffusion(Xt, DTI_or_coef)
+        c_x, c_y, c_z = c_X[:, 0:1], c_X[:, 1:2], c_X[:, 2:3]
         # Advection-diffusion equation residual
-        advection = vx * C_x + vy * C_y + vz * C_z
-        diffusion = self.D_normalized * (C_xx + C_yy + C_zz)
-        return C_t + advection - diffusion
+        advection = vx * c_x + vy * c_y + vz * c_z
+        return c_t + advection - c_diffusion

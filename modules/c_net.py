@@ -1,8 +1,9 @@
 from modules.data_module import CharacteristicDomain
 import torch
 import torch.nn as nn
-import lightning as L
+import torch.nn.functional as F
 import numpy as np
+from torch.func import grad, jacrev, vmap
 
 from modules.positional_encoding import PositionalEncoding_GeoTime
 from utils.visualize import visualize_prediction_vs_groundtruth
@@ -14,6 +15,8 @@ from utils.visualize import visualize_prediction_vs_groundtruth
 class MLP(nn.Module):
     def __init__(self, input_dim, output_dim, hidden_layers, hidden_features):
         super().__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
         layers = [nn.Linear(input_dim, hidden_features), nn.SiLU()]
         for _ in range(hidden_layers - 1):
             layers.append(nn.Linear(hidden_features, hidden_features))
@@ -37,192 +40,193 @@ class C_Net(nn.Module):
     def __init__(
         self,
         c_layers,
-        data,mask, char_domain:CharacteristicDomain,C_star,
+        data, char_domain: CharacteristicDomain, C_star,
         positional_encoding=True,
-        freq_nums = (8,8,8,0),
+        freq_nums=(8, 8, 8, 0),
         gamma_space=1.0,
     ):
         super().__init__()
         self.c_layers = c_layers
         self.positional_encoding = positional_encoding
+        self.char_domain = char_domain
 
+        c_input_dim = 4
         if positional_encoding:
-            num_freq_space = freq_nums[:3]
+            num_freq_space = np.array(freq_nums[:3])
             num_freq_time = freq_nums[3]
-            # always include input as non periodic representation.
-            c_pos_encoder = PositionalEncoding_GeoTime(
+            self.c_pos_encoder = PositionalEncoding_GeoTime(
                 num_freq_space,
                 num_freq_time,
                 include_input=True,
                 gamma_space=gamma_space,
             )
-            # update input layer size
-            c_layers[0] = 4 + int(num_freq_space.sum()) * 2 + int(num_freq_time) * 2
+            # Correctly calculate the input dimension for the MLP
+            c_input_dim = 4 + int(num_freq_space.sum()) * 2 + int(num_freq_time) * 2
+        else:
+            self.c_pos_encoder = None
 
-        self.c_net = MLP(
-            input_dim=c_layers[0],
+        # Define the MLP as a separate attribute
+        self.c_mlp = MLP(
+            input_dim=c_input_dim,
             output_dim=c_layers[-1],
             hidden_layers=len(c_layers) - 2,
             hidden_features=c_layers[1],
         )
 
-        self.c_net = nn.Sequential()
-        if positional_encoding:
-            self.c_net.add_module("c_positional_encoding", c_pos_encoder)
-        
-        self.c_net.add_module("c_mlp", MLP(
-            input_dim=c_layers[0],
-            output_dim=c_layers[-1],
-            hidden_layers=len(c_layers) - 2,
-            hidden_features=c_layers[1],
-        ))
+        # --- Keep validation attributes ---
+        self.val_slice_z = [char_domain.domain_shape[2] // 2 - 4, char_domain.domain_shape[2] // 2, char_domain.domain_shape[2] // 2 + 4]
+        base_t = char_domain.domain_shape[3] // 4 * 2
+        self.val_slice_t = [base_t - 6, base_t - 3, base_t, base_t + 3]
+        self.val_slice_4d = char_domain.get_characteristic_geotimedomain(slice_zindex=self.val_slice_z,
+                                                                       slice_tindex=self.val_slice_t) # (?,4)
+        Z, T = np.meshgrid(self.val_slice_z, self.val_slice_t, indexing='ij')
+        self.val_slice_gt_c = data[:, :, Z, T] / C_star
 
-        self.domain_shape = char_domain.domain_shape
+    def forward(self, X_train):
+        # Explicitly define the forward pass logic
+        if self.c_pos_encoder:
+            x = self.c_pos_encoder(X_train)
+        return self.c_mlp(x)
 
-        self.val_slice_z = [self.domain_shape[2]//2 - 4, self.domain_shape[2]//2, self.domain_shape[2]//2 + 4]
-        base_t = self.domain_shape[3]//4 * 2
-        self.val_slice_t = [base_t - 6, base_t - 3 ,base_t, base_t + 3]
-        self.val_slice_4d = char_domain.get_characteristic_geotimedomain(slice_zindex = self.val_slice_z, 
-                                                                       slice_tindex = self.val_slice_t)
-        Z,T = np.meshgrid(self.val_slice_z, self.val_slice_t, indexing='ij')
-        self.val_slice_gt_c = data[:, :, Z, T] / C_star # simulate the dataset process
-
-        self.mask = mask
-
-
-    def forward(self, x):
-        return self.c_net(x)
-
-    def draw_concentration_slices(self,):
+    def draw_concentration_slices(self, ):
         with torch.no_grad():
-            vol_disp_all = self.c_net(self.val_slice_4d).cpu().numpy().reshape(
-                self.domain_shape[0], self.domain_shape[1], len(self.val_slice_z), len(self.val_slice_t))
-            # self.logger.experiment.add_image('val_C_slice', vol_disp, self.current_epoch, dataformats='HW')
-            # scale of vol_disp will done inside visualize function
+            # Ensure val_slice_4d is on the correct device (vanilla pytorch has to do so)
+            device = next(self.parameters()).device
+            val_coords = self.val_slice_4d.to(device)
+            
+            vol_disp_all = self(val_coords).cpu().numpy().reshape(
+                self.char_domain.domain_shape[0], self.char_domain.domain_shape[1], len(self.val_slice_z), len(self.val_slice_t))
             c_vis_list = []
             for i in range(len(self.val_slice_z)):
                 for j in range(len(self.val_slice_t)):
                     slice_gt_c = self.val_slice_gt_c[:, :, i, j]
                     vol_disp = vol_disp_all[:, :, i, j]
-                    vol_disp *= self.mask[:,:,self.val_slice_z[i]]  # mask out of brain region
+                    vol_disp *= self.char_domain.mask[:, :, self.val_slice_z[i]]
                     c_vis_list.append(visualize_prediction_vs_groundtruth(vol_disp, slice_gt_c))
-            # stack all images horizontally (along H direction)
             return np.hstack(c_vis_list)
+    
+    # X should be the raw tuple extract from datamodule. D_coef could be number or tensor of shape (N,3,3)
+    # using vmap + jacrev to calculate the laplacian, will consume more memory but may be faster
+    def get_c_grad_ani_diffusion_full_jcb(self, Xt): # here X is a tuple of (x,y,z,t)
+        X, t = Xt
+        X.requires_grad_(True) # Still need this for the final backprop
+        t.requires_grad_(True)
+        # 1. Define a function that computes c for a SINGLE sample
+        def get_c_single(X, t):
+            # x is (3,), t is (1,), input must be (1,4,)
+            return self(torch.cat([X, t]).unsqueeze(0)).squeeze()
 
+        # 2. Get the gradient w.r.t. spatial coords (X) and time (t) for the whole batch
+        # use vmap to apply the grad function to each sample in the batch
+        c_spatial_grad, c_t = vmap(grad(get_c_single, argnums=(0, 1)))(X, t)
+        
+        # 3. Define a function to compute the diffusive flux for a SINGLE sample
+        def get_flux_single(x, t,D_tensor_for_sample, is_anisotropic):
+            # We need to re-evaluate the model to build the graph for the jacobian
+            def c_from_x(x_inner):
+                return get_c_single(x_inner, t)
+            c_grad_spatial_at_x = grad(c_from_x)(x)
+            if is_anisotropic: # Anisotropic
+                flux = D_tensor_for_sample @ c_grad_spatial_at_x
+            else:  # Isotropic
+                flux = c_grad_spatial_at_x  # We will scale by D later
+            return flux
 
-class Denoising_C_Pretrainer(L.LightningModule):
-    def __init__(self, c_net: C_Net, input_dim=4, lr=1e-3, freq_nums=(8,8,8,0), gamma_space=1.0,
-                 correct_nll: bool = True,
-                 detach_sigma_for_c: bool = False,
-                 warmup_freeze_c_epochs: int = 50,
-                 sigma_reg_weight: float = 0.01):
-        super().__init__()
-        self.save_hyperparameters()
-        self.positional_encoding = c_net.positional_encoding
-        if self.positional_encoding:
-            num_freq_space = freq_nums[:3]
-            num_freq_time = freq_nums[3]
-            self.pos_encoder = PositionalEncoding_GeoTime(
-                num_freq_space, num_freq_time,
-                include_input=True,
-                gamma_space=gamma_space,
-            )
-            mlp_input_dim = 4 + int(np.array(num_freq_space).sum()) * 2 + int(num_freq_time) * 2
+        # 4. Prepare the arguments for the vmap call.
+        is_anisotropic = (self.char_domain.DTI_or_coef.ndim != 0)
+        if is_anisotropic:
+            # Pre-calculate the entire batch of D tensors.
+            grid = X.view(1, -1, 1, 1, 3)
+            D_tensor_batch = F.grid_sample(self.char_domain.DTI_grid, grid, mode='nearest', align_corners=True)
+            D_tensor_batch = D_tensor_batch.view(-1, 3, 3)  # Shape: (N, 3, 3)
         else:
-            self.pos_encoder = None
-            mlp_input_dim = input_dim
-        self.c_net = c_net
+            # Create a placeholder if not needed. Its values won't be used.
+            D_tensor_batch = torch.empty(X.shape[0], 3, 3, device=X.device)
 
-        self.nn_noise = MLP(
-            input_dim=mlp_input_dim,
-            output_dim=1,
-            hidden_layers=5, # from Table D.8
-            hidden_features=66
+        # 4. Compute the Jacobian of the flux function for each sample and get its trace (the Laplacian)
+        # jacrev(get_flux_single) gives the full 3x3 Jacobian matrix, Differentiate the pure function w.r.t. x (arg 0).
+        # We vmap this over the batch.
+        flux_jacobians = vmap(jacrev(get_flux_single, argnums=0), in_dims=(0, 0, 0, None))(X, t, D_tensor_batch, is_anisotropic)
+        c_laplacian = torch.diagonal(flux_jacobians, offset=0, dim1=-2, dim2=-1).sum(-1)
+
+        # For isotropic case, scale the final result
+        if self.char_domain.DTI_or_coef.ndim == 0:
+            c_laplacian = self.char_domain.DTI_or_coef * c_laplacian
+
+        return c_spatial_grad, c_t, c_laplacian.unsqueeze(1)
+
+    # retain_graph if need backprop again like pde loss; provided_DTI_or_coef could be learnable.
+    def get_c_grad_ani_diffusion(self, Xt, learnable_DTI_or_coef=None):
+        X, t = Xt
+        X.requires_grad_(True)
+        t.requires_grad_(True)
+        # 1. Get the model's prediction for the whole batch.
+        pred_c = self(torch.cat(Xt, dim=-1))
+        # 2. Compute the first-order spatial gradient for the whole batch.
+        c_spatial_grad, c_t = torch.autograd.grad(
+            pred_c,
+            (X, t),
+            grad_outputs=torch.ones_like(pred_c),
+            create_graph=True,
         )
-
-    def forward(self, txyz_coords):
-        c_clean_pred = self.c_net(txyz_coords)
-        if self.pos_encoder is not None:
-            txyz_freq = self.pos_encoder(txyz_coords)
+        # 3. Calculate the diffusive flux for the whole batch.
+        DTI_or_coef = self.char_domain.DTI_or_coef if learnable_DTI_or_coef is None else learnable_DTI_or_coef
+        is_anisotropic = (DTI_or_coef.ndim != 0)
+        if is_anisotropic:
+            grid = X.view(1, -1, 1, 1, 3)
+            D_tensor = F.grid_sample(DTI_or_coef, grid, mode='nearest', align_corners=True)
+            D_tensor = D_tensor.view(-1, 3, 3)
+            diff_flux = torch.bmm(D_tensor, c_spatial_grad.unsqueeze(-1)).squeeze(-1)
         else:
-            txyz_freq = txyz_coords
-        sigma_0 = 0.01
-        predicted_sigma = 10.0 * torch.sigmoid(self.nn_noise(txyz_freq)) + sigma_0
-        return c_clean_pred, predicted_sigma
+            diff_flux = c_spatial_grad
 
-    def nll_loss(self, c_observed, c_pred, sigma_pred):
-        """
-        Gaussian NLL (up to constant): log σ + (err^2)/(2 σ^2)
-        If correct_nll=False fallback to previous (log σ^2 + err^2/(2 σ^2)).
-        """
-        err = c_observed - c_pred
-        eps = 1e-8
-        if self.hparams.correct_nll:
-            log_term = torch.log(sigma_pred + eps)           # log σ
-            quad_term = (err.pow(2)) / (2.0 * (sigma_pred.pow(2) + eps))
-            base = log_term + quad_term
-        else:
-            log_term = torch.log(sigma_pred.pow(2) + eps)    # log σ^2 (old)
-            quad_term = (err.pow(2)) / (2.0 * (sigma_pred.pow(2) + eps))
-            base = log_term + quad_term
+        # 4. Compute the Laplacian (divergence of the flux) component-wise.
+        # This is the most memory-efficient way.
+        c_laplacian = torch.zeros_like(t).squeeze(-1)
+        for i in range(3):
+            _retain_graph = (learnable_DTI_or_coef is not None or (i < 2))
+            # We compute the gradient of the i-th component of the flux w.r.t. full X.
+            # We do NOT need create_graph=True here, as we don't differentiate the Laplacian itself.
+            grad_of_flux_comp_i, = torch.autograd.grad(
+                outputs=diff_flux[:, i],
+                inputs=X,
+                grad_outputs=torch.ones_like(diff_flux[:, i]),
+                retain_graph=_retain_graph,
+            )
+            # We only keep the i-th component of the result (the diagonal term).
+            c_laplacian += grad_of_flux_comp_i[:, i]
+        # 5. Scale for the isotropic case.
+        if not is_anisotropic:
+            c_laplacian = DTI_or_coef * c_laplacian
+        return c_spatial_grad, c_t, c_laplacian.unsqueeze(1) # shaped (N, 1)
 
-        # Optional regularizer: encourage sigma^2 ≈ err^2 (optimal for true NLL)
-        if self.hparams.sigma_reg_weight > 0:
-            target = err.pow(2) + eps
-            reg = (torch.log(sigma_pred.pow(2) + eps) - torch.log(target)).pow(2)
-            base = base + self.hparams.sigma_reg_weight * reg
+    # calculate gradient and laplace outside (better getting anisotropic c_laplacian beforehand)
+    def get_TD_RBA_scale(self, t_list, c_grad, c_laplacian):
+        assert c_grad is not None and c_laplacian is not None
+        # detach early to avoid extra gradient flow
+        t_list = t_list.detach()
+        c_grad = c_grad.detach()
+        c_laplacian = c_laplacian.detach()
+        # Calculate the scaling factor for each time point
+        all_terms = torch.stack([
+            c_grad[:, 0].abs(),
+            c_grad[:, 1].abs(),
+            c_grad[:, 2].abs(),
+            (c_grad[:, 3] - (1/self.char_domain.Pe_g) * c_laplacian.squeeze()).abs()
+        ], dim=1) # Shape: (N, 4)
 
-        return base.mean()
+        # Vectorized approach to find max scale per unique time
+        unique_t, inverse_indices = torch.unique(t_list.squeeze(), return_inverse=True)
+        
+        # Use scatter_reduce_ to find the max of all terms for each unique time
+        # We need to find the max across all points that share a time value
+        max_terms_per_point = torch.max(all_terms, dim=1).values # Shape: (N,)
+        
+        # Then, find the max among points with the same time (T,)
+        max_scales_per_unique_t = torch.zeros_like(unique_t, dtype=max_terms_per_point.dtype)
+        max_scales_per_unique_t.scatter_reduce_(0, inverse_indices, max_terms_per_point, reduce="amax")
 
-    def on_train_start(self):
-        # Optionally freeze c_net for warmup
-        if self.hparams.warmup_freeze_c_epochs > 0:
-            for p in self.c_net.parameters():
-                p.requires_grad = False
-
-    def on_train_epoch_start(self):
-        # Unfreeze after warmup
-        if (self.hparams.warmup_freeze_c_epochs > 0 and
-                self.current_epoch == self.hparams.warmup_freeze_c_epochs):
-            for p in self.c_net.parameters():
-                p.requires_grad = True
-
-    def training_step(self, batch, batch_idx):
-        txyz_coords, c_observed = batch
-        c_clean_pred, sigma_pred = self(txyz_coords)
-
-        if self.hparams.detach_sigma_for_c:
-            # Two-part loss: NLL for sigma net, MSE (weighted by stopped sigma) for c_net
-            # 1. sigma branch
-            loss_sigma = self.nll_loss(c_observed.detach(), c_clean_pred.detach(), sigma_pred)
-            # 2. c branch
-            eps = 1e-8
-            sigma_det = sigma_pred.detach()
-            mse_weighted = ((c_observed - c_clean_pred).pow(2) / (sigma_det.pow(2) + eps)).mean()
-            loss = loss_sigma + mse_weighted
-            self.log("train_loss_sigma", loss_sigma, prog_bar=False)
-            self.log("train_loss_c_weighted", mse_weighted, prog_bar=False)
-        else:
-            loss = self.nll_loss(c_observed, c_clean_pred, sigma_pred)
-
-        self.log("train_loss", loss, prog_bar=True)
-        self.log("sigma_mean", sigma_pred.mean())
-        self.log("sigma_min", sigma_pred.min())
-        self.log("sigma_max", sigma_pred.max())
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        txyz_coords, c_observed = batch
-        c_clean_pred, sigma_pred = self(txyz_coords)
-        loss = self.nll_loss(c_observed, c_clean_pred, sigma_pred)
-        if batch_idx == 0:
-            self.log("val_data_loss", loss, prog_bar=True)
-            self.log("val_sigma_mean", sigma_pred.mean())
-            if self.current_epoch % 50 == 0:
-                c_vis_list = self.c_net.draw_concentration_slices()
-                # 2D image: use 'HW'
-                self.logger.experiment.add_image('val_C_compare', c_vis_list, self.current_epoch, dataformats='HW')
-        return loss
-
-    def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.hparams.lr)
+        # Broadcast the max scale back to all points (N,), need to detach.
+        t_scale = max_scales_per_unique_t[inverse_indices].detach()
+        
+        return t_scale # Return shape (N,) to match pointwise_loss
