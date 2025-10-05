@@ -29,9 +29,7 @@ class CNet_Init(Net_RBAResample):
         weight = 1.0 + 0.09 * c_observed
         pointwise_loss = weight * (C_pred - c_observed) ** 2
         
-        # Log the mean loss for monitoring
-        if batch_idx == 0:
-            self.log('train_c_init_data_loss', pointwise_loss.mean())
+        # Log the mean loss for monitoring(already done in RBA base class)
         
         # 3,4,5. Perform TDRBA-weighted optimization step and update RBA
         super().training_step(self.c_net, X_train_indice, pointwise_loss, Xt, batch_idx)
@@ -126,7 +124,6 @@ class CNet_DenoiseInit(Net_RBAResample):
         if batch_idx == 0:
             self.log('train_c_denoise_sigma', sigma_pred.mean())
             self.log('train_c_denoise_data_loss', errp2.mean())
-            self.log('train_c_denoise_nll_loss', nll_loss.mean())
 
         # RBA optimization
         super().training_step(self.c_net, X_train_indice, nll_loss, Xt, batch_idx)
