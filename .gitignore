@@ -2,5 +2,5 @@
 /data
 **/__pycache__
 /lightning_logs
-/.ipynb_checkpoints
+**/.ipynb_checkpoints
 /.virtual_documents
