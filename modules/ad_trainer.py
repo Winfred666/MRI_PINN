@@ -1,7 +1,7 @@
 from modules.ad_net import AD_Net
 import torch
 import torch.nn as nn
-from modules.rba_resample import Net_RBAResample
+from modules.rba_resample_trainer import Net_RBAResample
 
 
 class ADPINN_Base(Net_RBAResample):
@@ -34,9 +34,9 @@ class ADPINN_Base(Net_RBAResample):
         self.learning_rate = learning_rate
         self.L2_loss = nn.MSELoss()
 
-    def configure_optimizers(self):
-        params = [p for p in self.parameters() if p.requires_grad]
-        return torch.optim.AdamW(params, lr=self.learning_rate)
+    # def configure_optimizers(self):
+    #     params = [p for p in self.parameters() if p.requires_grad]
+    #     return torch.optim.AdamW(params, lr=self.learning_rate)
 
     # already setting check_val_every_n_epoch
     def validation_step(self, batch, batch_idx):

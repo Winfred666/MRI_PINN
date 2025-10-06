@@ -235,8 +235,8 @@ class DCEMRIDataModule(RBAResampleDataModule):
                 X_val_indice_list.append(np.arange(self.num_points))
 
         self.X_train = [torch.tensor(np.vstack(X_train_list[i]), dtype=torch.float32) for i in range(2)]
-        self.num_train_points = self.X_train[0].shape[0]
         self.X_train_indice = torch.tensor(np.hstack(X_train_indice_list), dtype=torch.long) # (num_points,)
+        self.num_train_points = self.X_train_indice.shape[0]
         self.C_train = torch.tensor(np.vstack(C_train_list), dtype=torch.float32)
 
         self.X_val = [torch.tensor(np.vstack(X_val_list[i]), dtype=torch.float32) for i in range(2)]

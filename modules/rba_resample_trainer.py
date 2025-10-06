@@ -24,9 +24,18 @@ class Net_RBAResample(L.LightningModule):
 
         self.enable_rbar = enable_rbar
 
+        self.final_learning_rate = torch.tensor(5e-5, dtype=torch.float32)
+        self.decay_rate = torch.tensor(0.99, dtype=torch.float32)
+
     # WARNING: if c_net is None, means normal rba weighted, else Time-dependent, need c_net to calculate gradient as weight.
     # pointwise_loss_list is a list of tensors, each (N, 1) shape
-    def training_step(self, c_net:C_Net|None, X_train_indice, pointwise_loss_list, Xt:torch.Tensor|None, batch_idx):
+    def training_step(self, c_net: C_Net | None, X_train_indice, pointwise_loss_list, Xt: torch.Tensor | None, batch_idx):
+        # Accept single tensor and wrap
+        if isinstance(pointwise_loss_list, torch.Tensor):
+            # Expect shape (N,1) or (N,)
+            pointwise_loss_list = [pointwise_loss_list if pointwise_loss_list.dim() > 1
+                                   else pointwise_loss_list.unsqueeze(1)]
+
         rba_weighted_loss = 0.0
         # Critical, here use c_net to compute time-dependent scaling factor(compute once per batch)
         if c_net is None:
@@ -34,27 +43,24 @@ class Net_RBAResample(L.LightningModule):
         else:
             c_X, c_t, c_laplacian = c_net.get_c_grad_ani_diffusion(Xt)
             c_grad = torch.cat([c_X, c_t], dim=1)
-            time_dependent_scaling = c_net.get_TD_RBA_scale(Xt[1], c_grad, c_laplacian)
-            time_dependent_scaling = time_dependent_scaling.detach()
-        
-        for i, (name, weight) in enumerate(self.rba_name_weight_list):
-            if self.enable_rbar:
-                old_lambda = getattr(self, name) # (num_train_points, )
-                # 3. Calculate RBA-weighted loss for backpropagation
+            time_dependent_scaling = c_net.get_TD_RBA_scale(Xt[1], c_grad, c_laplacian).detach()
 
-                old_lambda_part = old_lambda[X_train_indice]
-                # detach all factor before compute loss, to ban grad flow or extra memory usage.
-                old_lambda_part = old_lambda_part.detach()
+        for i, (name, weight) in enumerate(self.rba_name_weight_list):
+            pl = pointwise_loss_list[i]  # (N,1)
+            if self.enable_rbar:
+                # 3. Calculate RBA-weighted loss
+                old_lambda = getattr(self, name)
+                old_lambda_part = old_lambda[X_train_indice].detach()
 
                 if batch_idx == 0:
                     self.log(f'train_{name}_rba_weight_max', old_lambda_part.max())
-                # Add a small epsilon to prevent division by zero
-                rba_weighted_loss += weight * (old_lambda_part * pointwise_loss_list[i] / (time_dependent_scaling + 1e-8)).mean()
+
+                rba_weighted_loss += weight * (old_lambda_part * pl.squeeze(-1) / (time_dependent_scaling + 1e-8)).mean()
             else:
-                rba_weighted_loss += weight * pointwise_loss_list[i].mean()
-            
+                rba_weighted_loss += weight * pl.mean()
+
             if batch_idx == 0:
-                self.log(f'train_{name}_loss', pointwise_loss_list[i].mean())
+                self.log(f'train_{name}_loss', pl.mean())
 
         # 4. Manually optimize
         optimizer = self.optimizers()
@@ -64,12 +70,14 @@ class Net_RBAResample(L.LightningModule):
 
         # 5. Update RBA weights using the unweighted pointwise loss
         if self.enable_rbar:
-            pointwise_loss_list = [pl.detach().squeeze() for pl in pointwise_loss_list]
             with torch.no_grad():
                 for i, (name, _) in enumerate(self.rba_name_weight_list):
-                    res_max = pointwise_loss_list[i].max() + 1e-8
-                    old_lambda = getattr(self, name) # (num_train_points, )
-                    part_new_lambda = self.rba_gamma * old_lambda[X_train_indice] + self.rba_eta * (pointwise_loss_list[i] / res_max)
+                    pl = pointwise_loss_list[i].detach().squeeze()
+                    res_max = pl.max() + 1e-8
+                    old_lambda = getattr(self, name)
+                    part_new_lambda = self.rba_gamma * old_lambda[X_train_indice] + self.rba_eta * (pl / res_max)
+                    # Optional clamp to stabilize
+                    part_new_lambda = torch.clamp(part_new_lambda, 0.1, 100.0)
                     old_lambda[X_train_indice] = part_new_lambda
                     setattr(self, name, old_lambda)
 
@@ -88,4 +96,19 @@ class Net_RBAResample(L.LightningModule):
                 probs = probs + weight * (sharp_lambda / (sharp_lambda_mean + 1e-8))
         # add base probability to avoid too small sampling probability
         return probs + self.rba_c
+
+
+    def configure_optimizers(self):
+        params = [p for p in self.parameters() if p.requires_grad]
+        optim = torch.optim.AdamW(params, lr=self.hparams.learning_rate, weight_decay=1e-5)
+        # Fix decay schedule: smoothly decay until epoch_to_final_lr, then keep final LR
+        total_ratio = self.final_learning_rate / self.hparams.learning_rate
+        epoch_to_final_lr = torch.log(total_ratio) / torch.log(self.decay_rate)
+        def lr_lambda(current_epoch):
+            progress = min(max(current_epoch / epoch_to_final_lr.item(), 0.0), 1.0)
+            return total_ratio ** progress
+        return {
+            "optimizer": optim,
+            "lr_scheduler": torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda)
+        }
 

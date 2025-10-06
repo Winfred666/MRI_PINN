@@ -1,5 +1,5 @@
 from modules.c_net import C_Net, MLP
-from modules.rba_resample import Net_RBAResample
+from modules.rba_resample_trainer import Net_RBAResample
 import torch
 import numpy as np
 
@@ -26,11 +26,8 @@ class CNet_Init(Net_RBAResample):
         C_pred = self(torch.cat(Xt, dim=1))
 
         # 2. Calculate per-point weighted MSE loss (for RBA update)
-        weight = 1.0 + 0.09 * c_observed
-        pointwise_loss = weight * (C_pred - c_observed) ** 2
-        
+        pointwise_loss = (C_pred - c_observed) ** 2
         # Log the mean loss for monitoring(already done in RBA base class)
-        
         # 3,4,5. Perform TDRBA-weighted optimization step and update RBA
         super().training_step(self.c_net, X_train_indice, pointwise_loss, Xt, batch_idx)
     
@@ -46,14 +43,11 @@ class CNet_Init(Net_RBAResample):
         loss_data = ((c_observed - c_clean_pred) ** 2).mean()
 
         if batch_idx == 0:
-            self.log("val_data_loss", loss_data)
+            self.log('val_data_loss', loss_data)
             c_vis_list = self.c_net.draw_concentration_slices()
             self.logger.experiment.add_image('val_C_compare', c_vis_list, self.current_epoch, dataformats='WH')
         return loss_data
     
-    def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
-
 
 
 class CNet_DenoiseInit(Net_RBAResample):
@@ -134,10 +128,10 @@ class CNet_DenoiseInit(Net_RBAResample):
         c_clean_pred, _ = self(X_full)
         loss_data = ((c_observed - c_clean_pred) ** 2).mean()
         if batch_idx == 0:
-            self.log('val_c_denoise_data_loss', loss_data)
+            self.log('val_data_loss', loss_data)
             c_vis_list = self.c_net.draw_concentration_slices()
             self.logger.experiment.add_image('val_C_compare', c_vis_list, self.current_epoch, dataformats='WH')
         return loss_data
 
-    def configure_optimizers(self):
-        return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
+    # def configure_optimizers(self):
+    #     return torch.optim.Adam(self.parameters(), lr=self.hparams.learning_rate)

@@ -74,7 +74,7 @@ class C_Net(nn.Module):
         )
 
         # --- Keep validation attributes ---
-        self.val_slice_z = [char_domain.domain_shape[2] // 2 - 4, char_domain.domain_shape[2] // 2, char_domain.domain_shape[2] // 2 + 4]
+        self.val_slice_z = [char_domain.domain_shape[2] // 2 - 6, char_domain.domain_shape[2] // 2, char_domain.domain_shape[2] // 2 + 6]
         base_t = char_domain.domain_shape[3] // 4 * 2
         self.val_slice_t = [base_t - 6, base_t - 3, base_t, base_t + 3]
         self.val_slice_4d = char_domain.get_characteristic_geotimedomain(slice_zindex=self.val_slice_z,
