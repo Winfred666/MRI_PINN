@@ -267,6 +267,6 @@ class DCEMRIDataModule(RBAResampleDataModule):
             ds,
             batch_size=self.batch_size,
             shuffle=False,
-            num_workers=self.num_workers,
-            persistent_workers=True
+            num_workers=0, # use less resources for validation
+            persistent_workers=False
         )

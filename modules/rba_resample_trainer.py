@@ -41,9 +41,9 @@ class Net_RBAResample(L.LightningModule):
         if c_net is None:
             time_dependent_scaling = 1.0
         else:
-            c_X, c_t, c_laplacian = c_net.get_c_grad_ani_diffusion(Xt)
+            c_X, c_t, c_diffusion = c_net.get_c_grad_ani_diffusion(Xt)
             c_grad = torch.cat([c_X, c_t], dim=1)
-            time_dependent_scaling = c_net.get_TD_RBA_scale(Xt[1], c_grad, c_laplacian).detach()
+            time_dependent_scaling = c_net.get_TD_RBA_scale(Xt[1], c_grad, c_diffusion).detach()
 
         for i, (name, weight) in enumerate(self.rba_name_weight_list):
             pl = pointwise_loss_list[i]  # (N,1)

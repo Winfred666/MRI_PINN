@@ -205,8 +205,7 @@ class AD_Net(nn.Module):
         vx, vy, vz = self.v_net(torch.cat(Xt, dim=1))
         # When DTI is not known, apply anisotropic diffusion on grad_C for every timestep
         # provide learnable param char_domain.DTI_or_coef, cannot provide c as must be computed inside
-        DTI_or_coef =  self.D_normalized * self.char_domain.DTI_or_coef
-        c_X, c_t, c_diffusion = self.c_net.get_c_grad_ani_diffusion(Xt, DTI_or_coef)
+        c_X, c_t, c_diffusion = self.c_net.get_c_grad_ani_diffusion(Xt, self.D_normalized)
         c_x, c_y, c_z = c_X[:, 0:1], c_X[:, 1:2], c_X[:, 2:3]
         # Advection-diffusion equation residual
         advection = vx * c_x + vy * c_y + vz * c_z

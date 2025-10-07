@@ -37,7 +37,9 @@ def load_DTI(char_domain, path="data/DCE_nii_data/dti_tensor_3_3.mat", resize_to
     # need to resize it to the same shape as data
     DTI_tensor = resize_dti_log_euclidean(DTI_tensor, resize_to)
     print("Resized DTI shape: ", DTI_tensor.shape)
-    DTI_tensor = DTI_tensor * 60.0 / (char_domain.L_star**2/char_domain.T_star)
+
+    # WARNING: in the experiments, the tracer's DTI is about 1/3 of water's DTI
+    DTI_tensor = DTI_tensor * 60.0 / (char_domain.L_star**2/char_domain.T_star * 3)
 
     # sanity check MD
     DTI_MD = compute_DTI_MD(DTI_tensor)

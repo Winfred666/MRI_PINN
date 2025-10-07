@@ -156,7 +156,7 @@ class C_Net(nn.Module):
         return c_spatial_grad, c_t, c_laplacian.unsqueeze(1)
 
     # retain_graph if need backprop again like pde loss; provided_DTI_or_coef could be learnable.
-    def get_c_grad_ani_diffusion(self, Xt, learnable_DTI_or_coef=None):
+    def get_c_grad_ani_diffusion(self, Xt, learnable_D_factor=None):
         X, t = Xt
         X.requires_grad_(True)
         t.requires_grad_(True)
@@ -170,12 +170,11 @@ class C_Net(nn.Module):
             create_graph=True,
         )
         # 3. Calculate the diffusive flux for the whole batch.
-        DTI_or_coef = self.char_domain.DTI_or_coef if learnable_DTI_or_coef is None else learnable_DTI_or_coef
-        is_anisotropic = (DTI_or_coef.ndim != 0)
+        is_anisotropic = (self.char_domain.DTI_or_coef.ndim != 0)
         if is_anisotropic:
-            grid = X.view(1, -1, 1, 1, 3)
-            D_tensor = F.grid_sample(DTI_or_coef, grid, mode='nearest', align_corners=True)
-            D_tensor = D_tensor.view(-1, 3, 3)
+            grid = X.view(1, -1, 1, 1, 3) # shape (1, N, 1, 1, 3) for sampling
+            D_tensor = F.grid_sample(self.char_domain.DTI_or_coef, grid, mode='nearest', align_corners=True)
+            D_tensor = D_tensor.view(-1, 3, 3) # shape (N, 3, 3)
             diff_flux = torch.bmm(D_tensor, c_spatial_grad.unsqueeze(-1)).squeeze(-1)
         else:
             diff_flux = c_spatial_grad
@@ -184,7 +183,7 @@ class C_Net(nn.Module):
         # This is the most memory-efficient way.
         c_laplacian = torch.zeros_like(t).squeeze(-1)
         for i in range(3):
-            _retain_graph = (learnable_DTI_or_coef is not None or (i < 2))
+            _retain_graph = (learnable_D_factor is not None or (i < 2))
             # We compute the gradient of the i-th component of the flux w.r.t. full X.
             # We do NOT need create_graph=True here, as we don't differentiate the Laplacian itself.
             grad_of_flux_comp_i, = torch.autograd.grad(
@@ -195,9 +194,12 @@ class C_Net(nn.Module):
             )
             # We only keep the i-th component of the result (the diagonal term).
             c_laplacian += grad_of_flux_comp_i[:, i]
-        # 5. Scale for the isotropic case.
-        if not is_anisotropic:
-            c_laplacian = DTI_or_coef * c_laplacian
+        
+        # 5. Scale when isotropic or we has learnable D factor.
+        if learnable_D_factor is not None:
+            c_laplacian = learnable_D_factor * c_laplacian
+        elif not is_anisotropic: # when learnable_D_factor is not accessable, use default char_domain.DTI_or_coef
+            c_laplacian = self.char_domain.DTI_or_coef * c_laplacian
         return c_spatial_grad, c_t, c_laplacian.unsqueeze(1) # shaped (N, 1)
 
     # calculate gradient and laplace outside (better getting anisotropic c_laplacian beforehand)
