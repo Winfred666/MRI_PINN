@@ -19,14 +19,17 @@ def load_dcemri_data(path):
     return data, mask, pixdim, x, y, z, t
 
 
-def save_velocity_mat(vx,vy,vz, pixdim ,path="data/ad_net_velocity.mat"):
+
+def save_velocity_mat(vx,vy,vz, pixdim, D, use_DTI ,path="data/ad_net_velocity.mat"):
     v_tensor = np.stack([vx.flatten(), vy.flatten(), vz.flatten()], axis=1)  # shape (N, 3)
     v_tensor /= pixdim  # convert to cell/min
     v_tensor = v_tensor.reshape(-1, 1)  # shape (N*3, 1)
     # repeated 4 times, as in rOMT there are 4 interpolate steps
     v_tensor = np.tile(v_tensor, (4, 1))
     print(v_tensor.shape)
-    sio.savemat(path, {"u": v_tensor})
+    sio.savemat(path, {"u": v_tensor,
+                      "D": D,
+                      "use_DTI":use_DTI})
 
 from utils.process_DTI import resize_dti_log_euclidean, compute_DTI_MD
 

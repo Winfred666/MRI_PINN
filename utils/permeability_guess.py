@@ -2,29 +2,33 @@ import numpy as np
 import scipy.ndimage as ndi
 
 def estimate_initial_permeability(ser_data, time_points, 
-                                  ser_threshold=150.0, 
-                                  time_threshold_min=16.0,
+                                  ser_threshold=12.0, 
+                                  time_threshold_min=32.0,
                                   high_perm_value=1e-6,
                                   low_perm_value=1e-10):
     """
     Estimates the initial permeability map based on tracer arrival time.
 
     Args:
-        ser_data (np.ndarray): 4D array (time, z, y, x) of SER values.
+        ser_data (np.ndarray): 4D array (x, y, z, t) of SER values.
         time_points (np.ndarray): 1D array of time points in minutes.
         ser_threshold (float): SER value to define tracer arrival.
-        time_threshold_min (float): Time in minutes to define "quick" arrival.
+        
+        time_threshold_min (float): Time in minutes (4 min per frame) to define "quick" arrival.
+        16.0 means that the tracer arrive before 16 minutes after time_points[0], 
+        check mri_dataset_generator.ipynb for arrival adjustment. 
+        
         high_perm_value (float): Value for high permeability regions.
         low_perm_value (float): Value for low permeability regions.
 
     Returns:
-        np.ndarray: 3D array (z, y, x) of the initial permeability guess.
+        np.ndarray: 3D array (x, y, z) of the initial permeability guess.
     """
     
     # --- Step 1: Create a boolean mask of where the tracer arrived ---
     # This mask will be True for any voxel that EVER crosses the SER threshold.
-    # The shape will be (nz, ny, nx).
-    arrival_mask = np.any(ser_data > ser_threshold, axis=0)
+    # The shape will be (nx, ny, nz).
+    arrival_mask = np.any(ser_data > ser_threshold, axis=3)
     
     # --- Step 2: Calculate the "Arrival Time Map" ---
     # We want to find the time of FIRST passage across the threshold for each voxel.
@@ -32,11 +36,11 @@ def estimate_initial_permeability(ser_data, time_points,
     # Create a 4D boolean array where SER > threshold.
     exceeds_threshold_4d = ser_data > ser_threshold
     
-    # The 'argmax' trick: For each voxel, argmax along the time axis will return
+    # The 'argmax' trick: For each voxel, argmax along the time axis (axis=3) will return
     # the INDEX of the first True value. This is a very efficient way to find
     # the first time of passage.
     # Note: If a voxel never exceeds the threshold, argmax returns 0.
-    arrival_time_indices = np.argmax(exceeds_threshold_4d, axis=0)
+    arrival_time_indices = np.argmax(exceeds_threshold_4d, axis=3)
     
     # Convert these indices to actual time in minutes
     arrival_time_map = time_points[arrival_time_indices]
@@ -53,11 +57,11 @@ def estimate_initial_permeability(ser_data, time_points,
     is_fast_arrival = arrival_time_map < time_threshold_min
     
     # The high permeability mask is where the arrival was fast.
-    high_perm_mask = is_fast_arrival # Shape: (nz, ny, nx)
+    high_perm_mask = is_fast_arrival # Shape: (nx, ny, nz)
     
     # --- Step 4: Create the final permeability map ---
     # Initialize the entire map with the low permeability value.
-    initial_permeability_map = np.full(ser_data.shape[1:], low_perm_value, dtype=np.float32)
+    initial_permeability_map = np.full(ser_data.shape[:-1], low_perm_value, dtype=np.float32)
     
     # Use the mask to set the high permeability values.
     initial_permeability_map[high_perm_mask] = high_perm_value

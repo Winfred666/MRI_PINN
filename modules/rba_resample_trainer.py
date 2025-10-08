@@ -5,6 +5,12 @@ import torch
 
 # here we do not add time-dependent scaling factor, only rba resampling
 class Net_RBAResample(L.LightningModule):
+    
+    # give every training phase a name(its loss) for checkpoint saving,
+    def on_save_checkpoint(self, checkpoint):
+        checkpoint['train_phase'] = "+".join(
+            [self.rba_name_weight_list[i][0] for i in range(len(self.rba_name_weight_list))])
+
     # WARNING: the weight of loss is not only for gradient when do backpropagation but also for probability when resample from datamodule.
     def __init__(self, rba_name_weight_list, num_train_points,
                  rba_learning_rate=0.1, rba_memory=0.999, distribution_shapness=2.0, base_probability = 0.5, enable_rbar = True):

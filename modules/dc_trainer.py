@@ -27,22 +27,38 @@ class DCPINN_Base(Net_RBAResample):
                          enable_rbar)
         self.save_hyperparameters(ignore=['ad_dc_net'])
         self.ad_dc_net = ad_dc_net
-        self.c_net = ad_dc_net.c_net
-        self.v_dc_net = ad_dc_net.v_dc_net
+        # FIX: Remove direct shortcut assignments to sub-modules.
+        # self.c_net = ad_dc_net.c_net
+        # self.v_dc_net = ad_dc_net.v_dc_net
         self.learning_rate = learning_rate
         self.L2_loss = nn.MSELoss()
+    
+    def validation_step(self, batch, batch_idx):
+        # always use DCE-MRI batch for validation
+        Xt, _, c_observed = batch
+        x_full = torch.cat(Xt, dim=1)
+        with torch.no_grad():
+            # FIX: Access c_net through the main ad_dc_net module.
+            c_pred = self.ad_dc_net.c_net(x_full)
+        val_loss = ((c_pred - c_observed) ** 2).mean()
+        if batch_idx == 0:
+            self.log('val_data_loss', val_loss)
+            # FIX: Access sub-modules through the main ad_dc_net module.
+            c_vis = self.ad_dc_net.c_net.draw_concentration_slices()
+            self.logger.experiment.add_image('val_C_compare', c_vis, self.current_epoch, dataformats='WH')
+            rgb_img, _, _, _ = self.ad_dc_net.v_dc_net.draw_velocity_volume()
+            self.logger.experiment.add_image('val_v_quiver', rgb_img, self.current_epoch, dataformats='HWC')
+            
+            k_vis = self.ad_dc_net.v_dc_net.k_net.draw_permeability_volume()
+            self.logger.experiment.add_image('val_K_slices', k_vis, self.current_epoch, dataformats='HWC')
+            p_vis = self.ad_dc_net.v_dc_net.p_net.draw_pressure_slices()
+            self.logger.experiment.add_image('val_p_slices', p_vis, self.current_epoch, dataformats='HWC')
+
+        return val_loss
 
 
 class DCPINN_InitK(DCPINN_Base):
-    """Permeability network initialization using observed velocities.
-    Batch: (X, X_train_indice, v_observed) where:
-      X: (N,3), spatial points
-      v_observed: (N,3)
-    RBA entry: ('init_k_data', 1.0)
-    Only K_Net parameters are optimized; freeze P_Net & c_net.
-    """
-    def on_save_checkpoint(self, checkpoint):
-        checkpoint['train_phase'] = 'init_k'
+    train_phase = "init_k_data"
 
     def __init__(self,
                  ad_dc_net: AD_DC_Net,
@@ -53,37 +69,70 @@ class DCPINN_InitK(DCPINN_Base):
                  enable_rbar=True):
         super().__init__(ad_dc_net,
                          num_train_points,
-                         rba_name_weight_list=[("init_k_data", 1.0)],
+                         rba_name_weight_list=[(DCPINN_InitK.train_phase, 1.0)],
                          learning_rate=learning_rate,
                          rba_learning_rate=rba_learning_rate,
                          rba_memory=rba_memory,
                          enable_rbar=enable_rbar)
-        # Freeze unrelated params
-        for p in self.c_net.parameters():
-            p.requires_grad = False
-        for p in self.v_dc_net.p_net.parameters():
-            p.requires_grad = False
-        # Ensure K params require grad
-        for p in self.v_dc_net.k_net.parameters():
-            p.requires_grad = True
+        # self.k_net = ad_dc_net.v_dc_net.k_net # This was already correctly identified as a problem.
 
     def training_step(self, batch, batch_idx):
-        X, X_train_indice, v_observed = batch
-        v_pred = self.v_dc_net(X)  # (N,3)
-        pointwise_loss = ((v_pred - v_observed) ** 2).mean(dim=1, keepdim=True)
-        if batch_idx == 0:
-            self.log('train_init_k_data_loss', pointwise_loss.mean())
-        # No time-dependent scaling → c_net=None
+        X, X_train_indice, k_observed = batch
+        # FIX: Access k_net through the main ad_dc_net module.
+        k_pred = self.ad_dc_net.v_dc_net.k_net(X)
+        pointwise_loss = ((k_pred - k_observed) ** 2).mean(dim=1, keepdim=True)
         super().training_step(None, X_train_indice, [pointwise_loss], None, batch_idx)
 
+        # DEBUG: visualize k field slice to see if it is learning
+        # if batch_idx == 0:
+        #     # FIX: Access k_net through the main ad_dc_net module.
+        #     k_vis = self.ad_dc_net.v_dc_net.k_net.draw_permeability_volume()
+        #     self.logger.experiment.add_image('train_K_slices', k_vis, self.current_epoch, dataformats='HWC')
+
+# use velocity datamodule to init p net
+class DCPINN_InitP(DCPINN_Base):
+    train_phase = "init_p_data"
+    def __init__(self,
+                 ad_dc_net: AD_DC_Net,
+                 num_train_points,
+                 learning_rate=1e-3,
+                 rba_learning_rate=0.1,
+                 rba_memory=0.999,
+                 enable_rbar=True):
+        super().__init__(ad_dc_net,
+                         num_train_points,
+                         rba_name_weight_list=[(DCPINN_InitP.train_phase, 1.0)],
+                         learning_rate=learning_rate,
+                         rba_learning_rate=rba_learning_rate,
+                         rba_memory=rba_memory,
+                         enable_rbar=enable_rbar)
+        # self.v_dc_net = ad_dc_net.v_dc_net # FIX: Remove this shortcut.
+        # Freeze K net, Unfreeze P net
+        for p in self.ad_dc_net.v_dc_net.k_net.parameters():
+            p.requires_grad = False
+        for p in self.ad_dc_net.v_dc_net.p_net.parameters():
+            p.requires_grad = True
+    
+    def training_step(self, batch, batch_idx):
+        X, X_train_indice, v_observed = batch
+        # FIX: Access v_dc_net through the main ad_dc_net module.
+        v_pred_list = self.ad_dc_net.v_dc_net(X)
+        v_pred = torch.cat(v_pred_list, dim=1)  # (N,3)
+        pointwise_loss = ((v_pred - v_observed) ** 2).mean(dim=1, keepdim=True)
+        
+        super().training_step(None, X_train_indice, [pointwise_loss], None, batch_idx)
+
+        # DEBUG: visualize p field slice to see if it is learning
+        if batch_idx == 0:
+            p_vis = self.ad_dc_net.v_dc_net.p_net.draw_pressure_slices()
+            self.logger.experiment.add_image('train_p_slices', p_vis, self.current_epoch, dataformats='HWC')
 
 class DCPINN_ADPDE_P(DCPINN_Base):
     """Optimize pressure network via advection-diffusion residual (+ optional divergence residual).
     Batch: (Xt, X_train_indice, c_dummy) – c_dummy unused.
     RBA entries: [('pde_p_residual', 1.0)] or plus ('div_v_residual', div_weight) if incompressible.
     """
-    def on_save_checkpoint(self, checkpoint):
-        checkpoint['train_phase'] = 'pde_p'
+    train_phase = "ad_pde_p"
 
     def __init__(self,
                  ad_dc_net: AD_DC_Net,
@@ -94,7 +143,7 @@ class DCPINN_ADPDE_P(DCPINN_Base):
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
                  enable_rbar=True):
-        rba_list = [("pde_p_residual", 1.0)]
+        rba_list = [(DCPINN_ADPDE_P.train_phase, 1.0)]
         self.incompressible = incompressible
         if incompressible:
             rba_list.append(("div_v_residual", div_weight))
@@ -106,14 +155,14 @@ class DCPINN_ADPDE_P(DCPINN_Base):
                          rba_memory=rba_memory,
                          enable_rbar=enable_rbar)
         # Freeze c & K
-        for p in self.c_net.parameters():
+        for p in self.ad_dc_net.c_net.parameters():
             p.requires_grad = False
-        for p in self.v_dc_net.k_net.parameters():
+        for p in self.ad_dc_net.v_dc_net.k_net.parameters():
             p.requires_grad = False
         # Enable p_net params
-        for p in self.v_dc_net.p_net.parameters():
+        for p in self.ad_dc_net.v_dc_net.p_net.parameters():
             p.requires_grad = True
-        self.c_net.eval()
+        self.ad_dc_net.c_net.eval()
 
     def training_step(self, batch, batch_idx):
         Xt, X_train_indice, _ = batch
@@ -121,13 +170,40 @@ class DCPINN_ADPDE_P(DCPINN_Base):
         pde_pointwise = pde_residual ** 2
         loss_list = [pde_pointwise]
         if self.incompressible:
-            X, _t = Xt
-            div_v = self.v_dc_net.incompressible_residual(X)  # (N,1)
+            X, _ = Xt
+            div_v = self.ad_dc_net.v_dc_net.incompressible_residual(X)  # (N,1)
             div_pointwise = div_v ** 2
             loss_list.append(div_pointwise)
-        if batch_idx == 0:
-            self.log('pde_p_D', self.ad_dc_net.D.item())
-        super().training_step(self.c_net, X_train_indice, loss_list, Xt, batch_idx)
+        
+        super().training_step(self.ad_dc_net.c_net, X_train_indice, loss_list, Xt, batch_idx)
+
+class DCPINN_ADPDE_P_K(DCPINN_ADPDE_P):
+    # unfreeze k_net to jointly optimize p and k
+    train_phase = "ad_pde_p_k"
+    def __init__(self,
+                 ad_dc_net: AD_DC_Net,
+                 num_train_points,
+                 incompressible=False,
+                 div_weight=1.0,
+                 learning_rate=1e-3,
+                 rba_learning_rate=0.1,
+                 rba_memory=0.999,
+                 enable_rbar=True):
+        super().__init__(ad_dc_net,
+                         num_train_points,
+                         incompressible=incompressible,
+                         div_weight=div_weight,
+                         learning_rate=learning_rate,
+                         rba_learning_rate=rba_learning_rate,
+                         rba_memory=rba_memory,
+                         enable_rbar=enable_rbar)
+        # Freeze c_net, Unfreeze k_net and p_net
+        for c in self.ad_dc_net.c_net.parameters():
+            c.requires_grad = False
+        for k in self.ad_dc_net.v_dc_net.k_net.parameters():
+            k.requires_grad = True
+        for p in self.ad_dc_net.v_dc_net.p_net.parameters():
+            p.requires_grad = True
 
 
 class DCPINN_Joint(DCPINN_Base):
@@ -135,8 +211,8 @@ class DCPINN_Joint(DCPINN_Base):
     Batch: (Xt, X_train_indice, c_observed)
     Default weights: data=1.0, pde=10.0, div=1.0 (if incompressible)
     """
-    def on_save_checkpoint(self, checkpoint):
-        checkpoint['train_phase'] = 'joint'
+
+    train_phase = "joint_data+joint_ad_pde"
 
     def __init__(self,
                  ad_dc_net: AD_DC_Net,
@@ -149,7 +225,7 @@ class DCPINN_Joint(DCPINN_Base):
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
                  enable_rbar=True):
-        rba_list = [("joint_data", data_weight), ("joint_pde", pde_weight)]
+        rba_list = [("joint_data", data_weight), ("joint_ad_pde", pde_weight)]
         self.incompressible = incompressible
         if incompressible:
             rba_list.append(("joint_div", div_weight))
@@ -161,18 +237,18 @@ class DCPINN_Joint(DCPINN_Base):
                          rba_memory=rba_memory,
                          enable_rbar=enable_rbar)
         # Unfreeze all
-        for p in self.c_net.parameters():
+        for p in self.ad_dc_net.c_net.parameters():
             p.requires_grad = True
-        for p in self.v_dc_net.k_net.parameters():
+        for p in self.ad_dc_net.v_dc_net.k_net.parameters():
             p.requires_grad = True
-        for p in self.v_dc_net.p_net.parameters():
+        for p in self.ad_dc_net.v_dc_net.p_net.parameters():
             p.requires_grad = True
-        self.c_net.train()
+        self.ad_dc_net.c_net.train()
 
     def training_step(self, batch, batch_idx):
         Xt, X_train_indice, c_observed = batch
         x_full = torch.cat(Xt, dim=1)
-        c_pred = self.c_net(x_full)
+        c_pred = self.ad_dc_net.c_net(x_full)
         data_w = 1.0 + 0.09 * c_observed  # same heuristic
         data_pointwise = data_w * (c_pred - c_observed) ** 2
 
@@ -182,10 +258,8 @@ class DCPINN_Joint(DCPINN_Base):
 
         if self.incompressible:
             X, _t = Xt
-            div_v = self.v_dc_net.incompressible_residual(X)
+            div_v = self.ad_dc_net.v_dc_net.incompressible_residual(X)
             div_pointwise = div_v ** 2
             loss_list.append(div_pointwise)
 
-        if batch_idx == 0:
-            self.log('joint_D', self.ad_dc_net.D.item())
-        super().training_step(self.c_net, X_train_indice, loss_list, Xt, batch_idx)
+        super().training_step(self.ad_dc_net.c_net, X_train_indice, loss_list, Xt, batch_idx)

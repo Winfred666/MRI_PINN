@@ -130,17 +130,6 @@ class CharacteristicDomain():
             vol[ix, iy, iz, it] = v
         return vol
 
-
-class RBAResampleDataModule(L.LightningDataModule):
-    def __init__(self, ):
-        super().__init__()
-        self.rba_model = None
-        self.num_train_points = 0
-
-    # the model must be instance of Net_RBAResample
-    def set_RBA_resample_model(self, rba_model):
-        self.rba_model = rba_model
-
 class MultiInputDataset(torch.utils.data.Dataset):
     def __init__(self, X_list, train_indices, C):
         self.X_list = X_list
@@ -151,64 +140,118 @@ class MultiInputDataset(torch.utils.data.Dataset):
         return self.C.shape[0]
 
     def __getitem__(self, idx):
+        # implicitly fall back to tensor if not a list of tensor
+        if isinstance(self.X_list, torch.Tensor):
+            return self.X_list[idx], self.train_indices[idx], self.C[idx]
         return [X[idx] for X in self.X_list], self.train_indices[idx], self.C[idx]
+
+class RBAResampleDataModule(L.LightningDataModule):
+    def __init__(self, char_domain,  batch_size, num_workers=8, device="cpu"):
+        super().__init__()
+        self.rba_model = None
+        self.num_train_points = 0
+        self.num_workers = num_workers
+        self.device = device
+        self.batch_size = batch_size
+
+        self.char_domain = char_domain
+        # also make spatial points list here:
+        # Spatial points where mask == 1, for indexing
+        self.points_indices = np.array(np.where(self.char_domain.mask == 1)).T  # (num_points,3) integer indices
+        self.num_points = self.points_indices.shape[0]
+        # Normalize spatial coordinates to [-1, 1], only for dataset X input, not for indexing.
+        self.points = (self.points_indices * self.char_domain.pixdim - self.char_domain.L_offset) / self.char_domain.L_star
+
+
+    # the model must be instance of Net_RBAResample
+    def set_RBA_resample_model(self, rba_model):
+        self.rba_model = rba_model
+
+    def train_dataloader_with_weights(self, X_train, X_train_indice, C_train):
+        # throw error if num_train_points not set
+        if self.num_train_points == 0:
+            raise ValueError("num_train_points must be set before calling train_dataloader_with_weights.")
+    
+        ds = MultiInputDataset(X_train, X_train_indice, C_train)
+        sampler = None if self.rba_model is None else torch.utils.data.WeightedRandomSampler(
+            weights=self.rba_model.get_sample_prob_weight(),
+            num_samples=self.num_train_points, # still sample all points.
+            replacement=True
+        )
+        return torch.utils.data.DataLoader(
+            ds,
+            batch_size=self.batch_size,
+            shuffle=True if self.rba_model is None else None,
+            num_workers=self.num_workers,          # for safety of notebook and widget
+            persistent_workers=True,
+            sampler=sampler
+        )
+    def val_dataloader_simple(self, X_val, X_val_indice, C_val):
+        ds = MultiInputDataset(X_val, X_val_indice, C_val)
+        return torch.utils.data.DataLoader(
+            ds,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=0, # use less resources for validation
+            persistent_workers=False
+        )
 
 class VelocityDataModule(RBAResampleDataModule):
     # velocity is (x,y,z,3) numpy array, unit in grid/min
     def __init__(self, velocity, char_domain, batch_size=1024, num_workers=8, device="cpu"):
-        super().__init__()
+        # setting spatial self.points list.
+        super().__init__(char_domain, batch_size, num_workers, device)
         self.input_dim = 3  # (x,y,z)
         # convert to normalized unit
         self.velocity = velocity * (char_domain.pixdim / char_domain.V_star)
-        self.batch_size = batch_size
+        self.num_train_points = self.num_points
 
-        self.num_workers = num_workers
-        self.device = device
-
-        self.points = np.array(np.where(char_domain.mask == 1)).T  # (num_points,3) integer indices
-        self.num_train_points = self.num_points = self.points.shape[0]
-        self.points = self.points * char_domain.pixdim / char_domain.L_star  # normalize to [0,1]
-
+        
     def setup(self, stage=None):
         # no validation data, all for training.
-        V_train = self.velocity[self.points[:, 0].astype(int),
-                                self.points[:, 1].astype(int),
-                                self.points[:, 2].astype(int)]
+        V_train = self.velocity[self.points_indices[:, 0],
+                                self.points_indices[:, 1],
+                                self.points_indices[:, 2]]
         self.V_train = torch.tensor(V_train, dtype=torch.float32)
         self.X_train = torch.tensor(self.points, dtype=torch.float32)
         self.X_train_indice = torch.arange(self.num_points, dtype=torch.long)
     
     def train_dataloader(self):
-        ds = torch.utils.data.TensorDataset(self.X_train, self.X_train_indice, self.V_train)
-        return torch.utils.data.DataLoader(
-            ds,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,          # for safety of notebook and widget
-            persistent_workers=True,
-        )
-        
+        return self.train_dataloader_with_weights(self.X_train, self.X_train_indice, self.V_train)
+
+
+class PermeabilityDataModule(RBAResampleDataModule):
+    # permeability is (x,y,z) numpy array, unit in grid^2
+    def __init__(self, permeability, char_domain, batch_size=1024, num_workers=8, device="cpu"):
+        # already setting spatial self.points list in super.
+        super().__init__(char_domain, batch_size, num_workers, device)
+        self.input_dim = 3  # (x,y,z)
+        self.K_star = 1e-8  # k_0 as paper set.
+        self.permeability = permeability / self.K_star
+        self.num_train_points = self.num_points
+
+    def setup(self, stage=None):
+        # no validation data, all for training.
+        k_train = self.permeability[self.points_indices[:, 0],
+                                self.points_indices[:, 1],
+                                self.points_indices[:, 2]]
+        self.k_train = torch.tensor(k_train, dtype=torch.float32).reshape(-1, 1)
+        self.X_train = torch.tensor(self.points, dtype=torch.float32)
+        self.X_train_indice = torch.arange(self.num_points, dtype=torch.long)
+    
+    def train_dataloader(self):
+        return self.train_dataloader_with_weights(self.X_train, self.X_train_indice, self.k_train)
+
 # receive lightning module and sample with weight instead of uniform
 class DCEMRIDataModule(RBAResampleDataModule):
     def __init__(self, data, char_domain, batch_size=1024, num_workers=8, device="cpu"):
-        super().__init__()
+        super().__init__(char_domain, batch_size, num_workers, device)
         # Normalize output C to [0, 100.0] as characteristic scaling. No offset needed.
         self.C_star = (data.max() if data.max() > 0 else 1.0) / 100.0
+
         self.input_dim = 4  # (x,y,z,t)
-        self.char_domain = char_domain
         self.data = data / self.C_star
-        self.num_workers = num_workers
 
-        self.device = device
-        self.batch_size = batch_size
-
-        # Spatial points where mask == 1
-        self.points = np.array(np.where(char_domain.mask == 1)).T  # (num_points,3) integer indices
-        self.num_points = self.points.shape[0]
-        # Normalize spatial coordinates to [-1, 1]
-        self.points = (self.points * self.char_domain.pixdim - self.char_domain.L_offset) / self.char_domain.L_star
-
-        self.rba_model = None # to be set later
 
     # for testing instead of infer, we use half of data for training
     def setup(self, stage=None):
@@ -246,27 +289,8 @@ class DCEMRIDataModule(RBAResampleDataModule):
     # WARNING: compared to validation dataloader, training provide point_indice, 
     # to allow RBA weight calculation for each point
     def train_dataloader(self):
-        ds = MultiInputDataset(self.X_train, self.X_train_indice, self.C_train)
-        sampler = None if self.rba_model is None else torch.utils.data.WeightedRandomSampler(
-            weights=self.rba_model.get_sample_prob_weight(),
-            num_samples=self.num_train_points, # still sample all points.
-            replacement=True
-        )
-        return torch.utils.data.DataLoader(
-            ds,
-            batch_size=self.batch_size,
-            shuffle=True if self.rba_model is None else None,
-            num_workers=self.num_workers,          # for safety of notebook and widget
-            persistent_workers=True,
-            sampler=sampler
-        )
+        return self.train_dataloader_with_weights(self.X_train, self.X_train_indice, self.C_train)
+
 
     def val_dataloader(self):
-        ds = MultiInputDataset(self.X_val, self.X_val_indice, self.C_val)
-        return torch.utils.data.DataLoader(
-            ds,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=0, # use less resources for validation
-            persistent_workers=False
-        )
+        return self.val_dataloader_simple(self.X_val, self.X_val_indice, self.C_val)

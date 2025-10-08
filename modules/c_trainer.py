@@ -4,13 +4,11 @@ import torch
 import numpy as np
 
 class CNet_Init(Net_RBAResample):
-    def on_save_checkpoint(self, checkpoint):
-        checkpoint['train_phase'] = 'init_c'
-
+    train_phase = "init_c_data"
     def __init__(self, c_net: C_Net, num_train_points,
                  learning_rate=1e-3, rba_learning_rate=0.1, rba_memory=0.999,
                  enable_rbar=True):
-        super().__init__([("init_c_data", 1.0)], num_train_points,
+        super().__init__([(CNet_Init.train_phase, 1.0)], num_train_points,
                          rba_learning_rate, rba_memory, enable_rbar=enable_rbar)
 
         self.save_hyperparameters(ignore=['c_net'])
@@ -51,8 +49,8 @@ class CNet_Init(Net_RBAResample):
 
 
 class CNet_DenoiseInit(Net_RBAResample):
-    def on_save_checkpoint(self, checkpoint):
-        checkpoint['train_phase'] = 'init_c_denoise'
+
+    train_phase = "init_c_denoise_data"
 
     def __init__(self, c_net: C_Net, num_train_points,
                  learning_rate=1e-3,
@@ -62,7 +60,7 @@ class CNet_DenoiseInit(Net_RBAResample):
                  sigma_reg_weight: float = 0.001,
                  enable_rbar=True):
         # Use its own RBA entry name to distinguish logs if desired
-        super().__init__([("init_c_denoise_data", 1.0)], num_train_points,
+        super().__init__([(CNet_DenoiseInit.train_phase, 1.0)], num_train_points,
                          rba_learning_rate, rba_memory, enable_rbar=enable_rbar)
 
         self.save_hyperparameters(ignore=['c_net'])

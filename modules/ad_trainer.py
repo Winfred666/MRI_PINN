@@ -67,9 +67,7 @@ class ADPINN_InitV(ADPINN_Base):
       v_observed: (N,3)
     RBA list: one component ('init_v_data', 1.0)
     """
-    def on_save_checkpoint(self, checkpoint):
-        checkpoint['train_phase'] = 'init_v'
-
+    train_phase = "init_v_data"
     def __init__(self,
                  ad_net: AD_Net,
                  num_train_points,
@@ -103,9 +101,7 @@ class ADPINN_PDE_V(ADPINN_Base):
     Batch: (Xt, X_train_indice, c_dummy) where c_dummy can be zeros (unused).
     RBA list: ('pde_v_residual', 1.0)
     """
-    def on_save_checkpoint(self, checkpoint):
-        checkpoint['train_phase'] = 'pde_v'
-
+    train_phase = "ad_pde_v"
     def __init__(self,
                  ad_net: AD_Net,
                  num_train_points,
@@ -115,7 +111,7 @@ class ADPINN_PDE_V(ADPINN_Base):
                  enable_rbar=True):
         super().__init__(ad_net,
                          num_train_points,
-                         rba_name_weight_list=[("pde_v_residual", 1.0)],
+                         rba_name_weight_list=[(ADPINN_PDE_V.train_phase, 1.0)],
                          learning_rate=learning_rate,
                          rba_learning_rate=rba_learning_rate,
                          rba_memory=rba_memory,
@@ -144,8 +140,8 @@ class ADPINN_Joint(ADPINN_Base):
     RBA list: [('joint_data', 1.0), ('joint_pde', 10.0)]
     Weight 10.0 is applied inside Net_RBAResample for sampling & optimization.
     """
-    def on_save_checkpoint(self, checkpoint):
-        checkpoint['train_phase'] = 'joint'
+
+    train_phase = "joint_data+joint_ad_pde"
 
     def __init__(self,
                  ad_net: AD_Net,
@@ -157,7 +153,7 @@ class ADPINN_Joint(ADPINN_Base):
         super().__init__(ad_net,
                          num_train_points,
                          rba_name_weight_list=[("joint_data", 1.0),
-                                               ("joint_pde", 10.0)],
+                                               ("joint_ad_pde", 10.0)],
                          learning_rate=learning_rate,
                          rba_learning_rate=rba_learning_rate,
                          rba_memory=rba_memory,

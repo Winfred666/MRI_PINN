@@ -4,7 +4,7 @@ import numpy as np
 from modules.positional_encoding import PositionalEncoding_Geo
 from torch import nn
 import torch
-from utils.visualize import fixed_quiver_image  # added import
+from utils.visualize import fixed_quiver_image
 
 
 # in ad_net there is nn to build advect-diffuse equation,
@@ -57,61 +57,46 @@ class V_Net(nn.Module):
                 nn.init.xavier_normal_(m.weight)
                 nn.init.zeros_(m.bias)
 
-    def forward(self, x):
-        x_spatial = x[:, :3]
+    def forward(self, X):
         # if incompressible, use vector potential to compute velocity
         if self.incompressible:
-            psi = self.v_net_raw(x_spatial)  # steady-assumption
+            X.requires_grad_(True)
+            psi = self.v_net_raw(X)  # steady-assumption
             psi_x, psi_y, psi_z = torch.split(psi, 1, dim=1)
+            psi_x_grad = torch.autograd.grad(
+                psi_x, X,
+                grad_outputs=torch.ones_like(psi_x),
+                create_graph=True,
+            )[0]
+            psi_y_grad = torch.autograd.grad(
+                psi_y, X,
+                grad_outputs=torch.ones_like(psi_y),
+                create_graph=True,
+            )[0]
+            psi_z_grad = torch.autograd.grad(
+                psi_z, X,
+                grad_outputs=torch.ones_like(psi_z),
+                create_graph=True,
+            )[0]
             vx = (
-                torch.autograd.grad(
-                    psi_z,
-                    x[:, 1],
-                    grad_outputs=torch.ones_like(psi_z),
-                    create_graph=True,
-                )[0]
-                - torch.autograd.grad(
-                    psi_y,
-                    x[:, 2],
-                    grad_outputs=torch.ones_like(psi_y),
-                    create_graph=True,
-                )[0]
+                psi_z_grad[:, 1]
+                - psi_y_grad[:, 2]
             )
             vy = (
-                torch.autograd.grad(
-                    psi_x,
-                    x[:, 2],
-                    grad_outputs=torch.ones_like(psi_x),
-                    create_graph=True,
-                )[0]
-                - torch.autograd.grad(
-                    psi_z,
-                    x[:, 0],
-                    grad_outputs=torch.ones_like(psi_z),
-                    create_graph=True,
-                )[0]
+                psi_x_grad[:, 2]
+                - psi_z_grad[:, 0]
             )
             vz = (
-                torch.autograd.grad(
-                    psi_y,
-                    x[:, 0],
-                    grad_outputs=torch.ones_like(psi_y),
-                    create_graph=True,
-                )[0]
-                - torch.autograd.grad(
-                    psi_x,
-                    x[:, 1],
-                    grad_outputs=torch.ones_like(psi_x),
-                    create_graph=True,
-                )[0]
+                psi_y_grad[:, 0]
+                - psi_x_grad[:, 1]
             )
             vx, vy, vz = vx.unsqueeze(1), vy.unsqueeze(1), vz.unsqueeze(1)
         else:
-            v = self.v_net_raw(x_spatial)
+            v = self.v_net_raw(X)
             vx, vy, vz = v[:, 0:1], v[:, 1:2], v[:, 2:3]
         return vx, vy, vz
 
-    def draw_velocity_volume(self):
+    def draw_velocity_volume(self, label="|v| magnitude"):
         """
         mask: (nx, ny, nz) using that in char_domain
         pixdim: voxel spacing (3,) for physical quiver scaling
@@ -125,7 +110,7 @@ class V_Net(nn.Module):
             vx = vx.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[0] * mask_np
             vy = vy.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[1] * mask_np
             vz = vz.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[2] * mask_np
-            rgb_img = fixed_quiver_image(vx, vy, vz, self.char_domain.pixdim)
+            rgb_img = fixed_quiver_image(vx, vy, vz, self.char_domain.pixdim, label=label)
             return rgb_img, vx, vy, vz
 
 
@@ -171,22 +156,22 @@ class AD_Net(nn.Module):
         """Peclet number, representing the ratio of advection to diffusion."""
         return torch.exp(self._log_Pe)
 
-    # used for learning
+    # used for learning, characteristic domain
     @property
     def D_normalized(self):
         return 1.0 / self.Pe
     
-    # used for visualization and result showing.
+    # used for visualization and result showing, unit mm^2/min
     @property
     def D(self):
         return self.D_normalized * (
             self.char_domain.L_star.mean() * 
             self.char_domain.V_star.mean())
 
-    def forward(self, x):
+    def forward(self, Xt):
         # x: (N,4) with (x,y,z,t) normalized to [0,1]
-        c = self.c_net(x)
-        vx, vy, vz = self.v_net(x)
+        c = self.c_net(Xt)
+        vx, vy, vz = self.v_net(Xt[0])
         return c, vx, vy, vz
 
     def c_t_smoothness_residual(self, Xt, provided_pred_c=None):
@@ -202,7 +187,7 @@ class AD_Net(nn.Module):
         return (c_t **2).mean()
 
     def pde_residual(self, Xt):
-        vx, vy, vz = self.v_net(torch.cat(Xt, dim=1))
+        vx, vy, vz = self.v_net(Xt[0])
         # When DTI is not known, apply anisotropic diffusion on grad_C for every timestep
         # provide learnable param char_domain.DTI_or_coef, cannot provide c as must be computed inside
         c_X, c_t, c_diffusion = self.c_net.get_c_grad_ani_diffusion(Xt, self.D_normalized)

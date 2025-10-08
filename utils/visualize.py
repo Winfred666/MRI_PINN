@@ -157,28 +157,33 @@ def draw_nifti_slices_with_threshold(img, brain_mask=None):
 
     v = vol.astype(np.float32, copy=False)
     finite_mask = np.isfinite(v)
-
+    
+    vmin, vmax = 0, 1 # Default values
     if finite_mask.any():
         vmin = np.percentile(v[finite_mask], 1.0)
         vmax = np.percentile(v[finite_mask], 99.0)
-        vol_disp = np.clip((v - vmin) / (vmax - vmin + 1e-8), 0, 1.0)
+        vmax = vmin + 1e-8 if vmax <= vmin else vmax
+        vol_disp = np.clip((v - vmin) / (vmax - vmin), 0, 1.0)
     else:
         vol_disp = v
 
-    # If a brain mask is provided, apply it
+    # If a brain mask is provided, apply it to the display volume
     if brain_mask is not None:
         vol_disp = vol_disp * brain_mask
 
     def view_slice(z=0, thr=0.5):
         plt.figure(figsize=(6, 6))
 
-        slice_img = vol_disp[:, :, z].T
+        # Display image is normalized for consistent colormapping
+        slice_disp_img = vol_disp[:, :, z].T
+        # Original data slice for absolute thresholding
+        slice_orig_img = v[:, :, z].T
 
-        # Threshold mask
-        roi_mask = slice_img > thr
+        # Threshold mask is now on original data
+        roi_mask = slice_orig_img > thr
 
         # Show both image and ROI overlay
-        plt.imshow(slice_img, cmap="gray", origin="lower", interpolation="nearest")
+        plt.imshow(slice_disp_img, cmap="gray", origin="lower", interpolation="nearest")
         plt.imshow(np.ma.masked_where(~roi_mask, roi_mask), 
                    cmap="autumn", alpha=0.5, origin="lower", interpolation="nearest")
         plt.axis("off")
@@ -188,7 +193,7 @@ def draw_nifti_slices_with_threshold(img, brain_mask=None):
     _ = interact(
         view_slice,
         z=widgets.IntSlider(min=0, max=int(vol_disp.shape[2]) - 1, step=1, value=int(vol_disp.shape[2]) // 2),
-        thr=widgets.FloatSlider(min=0.0, max=1.0, step=0.01, value=0.5)
+        thr=widgets.FloatSlider(min=vmin, max=vmax, step=(vmax-vmin)/100, value=(vmin+vmax)/2, description='Abs Thr')
     )
 
 
@@ -271,21 +276,54 @@ def draw_nifti_slices_with_time(pred_imgs, gt_imgs=None, brain_mask=None, normal
     ax.axis('off')
     plt.tight_layout()
 
+    # Custom formatter to show original data values on hover
+    def formatter(x, y):
+        # Get current slider values
+        z = z_slider.value
+        t = t_slider.value
+
+        # Round hover coordinates to get pixel indices
+        col = int(x + 0.5)
+        row = int(y + 0.5)
+
+        # Get the original, un-normalized slice
+        original_slice = data[:, :, z, t]
+        if transpose_xy:
+            original_slice = original_slice.T
+
+        # Check if cursor is within image bounds
+        if 0 <= row < original_slice.shape[0] and 0 <= col < original_slice.shape[1]:
+            val = original_slice[row, col]
+            return f'x={x:.1f}, y={y:.1f}, value={val:.4f}'
+        else:
+            return f'x={x:.1f}, y={y:.1f}'
+
+    ax.format_coord = formatter
+
     # Sliders
     t_slider  = widgets.IntSlider(min=0, max=T-1, step=1, value=t0, description='Time')
     z_slider  = widgets.IntSlider(min=0, max=Z-1, step=1, value=z0, description='Z')
-    thr_slider = widgets.FloatSlider(min=0.0, max=1.0, step=0.01, value=0.5, description='Thr')
+    # Use absolute value range for the threshold slider
+    thr_slider = widgets.FloatSlider(min=vmin, max=vmax, step=(vmax-vmin)/100, value=(vmin+vmax)/2, description='Abs Thr')
 
     def update(_):
         t = t_slider.value
         z = z_slider.value
-        thr = thr_slider.value
-        sl = normed[:, :, z, t]
-        if transpose_xy:
-            sl = sl.T
-        img_artist.set_data(sl)
+        thr = thr_slider.value # This is now an absolute value
+        
+        # Normalized slice for display
+        sl_normed = normed[:, :, z, t]
+        # Original data slice for thresholding
+        sl_original = data[:, :, z, t]
 
-        mask = sl > thr
+        if transpose_xy:
+            sl_normed = sl_normed.T
+            sl_original = sl_original.T
+
+        img_artist.set_data(sl_normed)
+
+        # Apply threshold to original data
+        mask = sl_original > thr
         overlay_artist.set_data(np.ma.masked_where(~mask, mask))
         ax.set_title(f"t={t}/{T-1}, z={z}/{Z-1}, thr={thr:.2f}")
         fig.canvas.draw_idle()
@@ -328,7 +366,7 @@ def visualize_prediction_vs_groundtruth(pred_img, gt_img, vmin=0, vmax=1):
 # Add a fixed-view quiver exporter returning an RGB array
 def fixed_quiver_image(vx, vy, vz, pixdim, stride=3, length_scale=0.8, elev=-72.76, azim=-10.87,
                        cmap='RdYlBu_r', normalize_vectors=False, figsize=(7, 6), dpi=100,
-                       add_colorbar=True, close_fig=True, zoom=1.25):
+                       add_colorbar=True, close_fig=True, zoom=1.25, label="|v| magnitude"):
     """
     Render a 3D quiver plot at a fixed view and return it as an RGB (H,W,3) uint8 array.
     Uses separate ScalarMappable so colorbar always shows colors.
@@ -351,9 +389,7 @@ def fixed_quiver_image(vx, vy, vz, pixdim, stride=3, length_scale=0.8, elev=-72.
 
     ax.view_init(elev=elev, azim=azim)
 
-
-
-        # Simulated zoom via axis limits
+    # Simulated zoom via axis limits
     if zoom > 1.0:
         # Determine center in voxel indices
         cx = (vx.shape[0]-1)/2.0
@@ -378,7 +414,7 @@ def fixed_quiver_image(vx, vy, vz, pixdim, stride=3, length_scale=0.8, elev=-72.
 
     if add_colorbar and mappable is not None:
         cb = fig.colorbar(mappable, ax=ax, shrink=0.65, pad=0.1)
-        cb.set_label('|v| (magnitude)')
+        cb.set_label(label)
 
     # Robust figure-to-RGB extraction
     rgb = None
@@ -404,5 +440,75 @@ def fixed_quiver_image(vx, vy, vz, pixdim, stride=3, length_scale=0.8, elev=-72.
 
     if close_fig:
         plt.close(fig)
+
+    return rgb
+
+
+def draw_colorful_slice_image(slice_data, cmap='viridis', mask=None):
+    """
+    Renders a 2D data slice into a colorful RGB image array in a headless manner.
+    The plot has no axes or title, and a tight colorbar showing the original data range.
+
+    Args:
+        slice_data (np.ndarray): The 2D numpy array to plot.
+        cmap (str): The name of the matplotlib colormap to use.
+
+    Returns:
+        np.ndarray: An RGB (H, W, 3) uint8 array of the resulting image.
+    """
+
+    # Handle mask if provided
+    if mask is not None:
+        # Determine data range for the color bar, should only select in mask
+        vmin = slice_data[mask].min()
+        vmax = slice_data[mask].max()
+        # Mask where mask is False
+        slice_data = np.ma.masked_where(~mask, slice_data)
+        cmap = plt.get_cmap(cmap).copy()
+        cmap.set_bad(color='white')
+    else:
+        vmin = slice_data.min()
+        vmax = slice_data.max()
+    # Create figure and axes with a specific size and DPI
+    fig, ax = plt.subplots(figsize=(4, 4), dpi=100)
+
+    # Plot the image data. imshow handles mapping values to the colormap via vmin/vmax.
+    im = ax.imshow(slice_data, cmap=cmap, vmin=vmin, vmax=vmax, origin='lower', interpolation='nearest')
+
+    # Add a colorbar, making it compact
+    fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+    # Remove axis ticks and labels
+    ax.axis('off')
+    # Ensure tight layout before rendering
+    plt.tight_layout(pad=0)
+
+    # Robust figure-to-RGB extraction (adapted from fixed_quiver_image)
+    rgb = None
+    try:
+        fig.canvas.draw()
+        # Try modern, direct buffer access first
+        if hasattr(fig.canvas, "buffer_rgba"):
+            w, h = fig.canvas.get_width_height()
+            buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8).reshape(h, w, 4)
+            rgb = buf[..., :3].copy() # Drop alpha channel
+        # Fallback for older versions
+        elif hasattr(fig.canvas, "tostring_rgb"):
+            w, h = fig.canvas.get_width_height()
+            buf = fig.canvas.tostring_rgb()
+            rgb = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 3)
+        else:
+            raise AttributeError("No direct RGB buffer method found on canvas.")
+    except Exception:
+        # Fallback to saving the figure to an in-memory buffer if direct methods fail
+        import io
+        from PIL import Image
+        bio = io.BytesIO()
+        # bbox_inches='tight' is crucial for removing whitespace
+        fig.savefig(bio, format='png', dpi=fig.dpi, bbox_inches='tight', pad_inches=0)
+        bio.seek(0)
+        rgb = np.array(Image.open(bio).convert("RGB"))
+
+    # Close the figure to free up memory
+    plt.close(fig)
 
     return rgb
