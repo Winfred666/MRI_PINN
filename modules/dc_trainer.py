@@ -42,7 +42,7 @@ class DCPINN_Base(Net_RBAResample):
         # get spatial points at t_index and t_index + 1
         start_c = self.ad_dc_net.c_net.gt_data[:, :, :, t_index]
         end_c = self.ad_dc_net.c_net.gt_data[:, :, :, t_index + t_jump]
-        
+
         # we are not using training c_dataset (half of whole data), so no need to *2 for duration.
         t_duration = char_domain.t[t_index + t_jump] - char_domain.t[t_index]  # in min
         
@@ -74,6 +74,7 @@ class DCPINN_Base(Net_RBAResample):
         val_loss = ((c_pred - c_observed) ** 2).mean()
         if batch_idx == 0:
             self.log('val_data_loss', val_loss)
+            self.log('Diffusivity mm^2/min (scale factor for DTI)', self.ad_dc_net.D)
             # FIX: Access sub-modules through the main ad_dc_net module.
             c_vis = self.ad_dc_net.c_net.draw_concentration_slices()
             self.logger.experiment.add_image('val_C_compare', c_vis, self.current_epoch, dataformats='WH')
@@ -83,11 +84,11 @@ class DCPINN_Base(Net_RBAResample):
             self.logger.experiment.add_image('val_adv_diff_step', 
                                              self.validate_forward_step(vx, vy, vz, t_index=len(self.ad_dc_net.char_domain.t) // 4, 
                                                                         t_jump=3), self.current_epoch, dataformats='WH')
-
             k_vis = self.ad_dc_net.v_dc_net.k_net.draw_permeability_volume() # shaped (H,W,C)
             self.logger.experiment.add_image('val_K_slices', k_vis, self.current_epoch, dataformats='HWC')
             p_vis = self.ad_dc_net.v_dc_net.p_net.draw_pressure_slices()
             self.logger.experiment.add_image('val_p_slices', p_vis, self.current_epoch, dataformats='HWC')
+
 
         return val_loss
 
