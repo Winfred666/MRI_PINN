@@ -3,10 +3,10 @@
 
 # --- Training Control ---
 # If false, load a model from ckpt_path for inference without training.
-do_training: false
+do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: false
+continue_training: true
 
 ckpt_path: "results/dcpinn_full_runtest_251008_1722/adpinn_init_p_data.pth"
 
@@ -40,10 +40,10 @@ enable_rbar: true
 # This can slow down training epochs but may lead to faster convergence.
 
 # --- Dataloader & Checkpointing Settings ---
-reload_dataloaders_every_n_epochs: 50
+reload_dataloaders_every_n_epochs: 5
 # How often to re-evaluate RBAR weights. Set to 0 if RBAR is disabled.
 
-ckpt_save_val_interval: 50
+ckpt_save_val_interval: 5
 # How often to run validation and save checkpoints (in epochs).
 
 dataset_num_workers: 18
@@ -54,35 +54,35 @@ dataset_num_workers: 18
 phases:
   # init_c_data:
   #   learning_rate: 0.002
-  #   max_epochs: 20
+  #   max_epochs: 10
   #   batch_size: 100000
 
-  # # init_c_denoise_data:
-  # #   learning_rate: 0.002
-  # #   max_epochs: 5
-  # #   batch_size: 20000
+  # init_c_denoise_data:
+  #   learning_rate: 0.002
+  #   max_epochs: 10
+  #   batch_size: 20000
 
-  init_k_data:
-    learning_rate: 0.002
-    max_epochs: 120
-    batch_size: 200000
+  # init_k_data:
+  #   learning_rate: 0.002
+  #   max_epochs: 10
+  #   batch_size: 200000
 
-  init_p_data:
-    learning_rate: 0.002
-    max_epochs: 240
-    batch_size: 200000
+  # init_p_data:
+  #   learning_rate: 0.002
+  #   max_epochs: 10
+  #   batch_size: 200000
 
   ad_pde_p:
-    learning_rate: 0.0005
-    max_epochs: 102
+    learning_rate: 0.002
+    max_epochs: 10
     batch_size: 20000
 
   ad_pde_p_k:
-    learning_rate: 0.0005
-    max_epochs: 102
+    learning_rate: 0.002
+    max_epochs: 10
     batch_size: 20000
 
   joint_data+joint_ad_pde:
     learning_rate: 0.0002
-    max_epochs: 102
-    batch_size: 20000
+    max_epochs: 10
+    batch_size: 18000

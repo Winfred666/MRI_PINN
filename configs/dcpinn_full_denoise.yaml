@@ -6,7 +6,7 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: true
+continue_training: false
 
 ckpt_path: "tb_logs/seqtrain_ADPINN/dcpinn_full_251008_1914/checkpoints/last.ckpt"
 
@@ -25,6 +25,7 @@ positional_encoding:
   freq_nums: [20, 20, 20, 0] # Frequencies for (x, y, z, t)
   freq_scale: 1.0
 
+cuda_visible_devices: [1]
 
 # --- Physics & PDE Configuration ---
 use_DTI: true
@@ -37,7 +38,6 @@ viscosity: 6.95e-4
 enable_rbar: true
 # If true, enables RBAR to focus training on points with higher loss.
 # This can slow down training epochs but may lead to faster convergence.
-
 
 # --- Dataloader & Checkpointing Settings ---
 reload_dataloaders_every_n_epochs: 100
@@ -57,24 +57,24 @@ phases:
   #   max_epochs: 4000
   #   batch_size: 280000
 
-  # init_c_denoise_data:
-  #   learning_rate: 0.001
-  #   max_epochs: 5000
-  #   batch_size: 280000
+  init_c_denoise_data:
+    learning_rate: 0.001
+    max_epochs: 5000
+    batch_size: 280000
 
-  # init_k_data:
-  #   learning_rate: 0.001
-  #   max_epochs: 4000
-  #   batch_size: 280000
+  init_k_data:
+    learning_rate: 0.001
+    max_epochs: 4000
+    batch_size: 280000
 
-  # init_p_data:
-  #   learning_rate: 0.001
-  #   max_epochs: 4000
-  #   batch_size: 280000
+  init_p_data:
+    learning_rate: 0.001
+    max_epochs: 4000
+    batch_size: 280000
 
   ad_pde_p:
     learning_rate: 0.001
-    max_epochs: 2
+    max_epochs: 50000
     batch_size: 280000
 
   ad_pde_p_k:

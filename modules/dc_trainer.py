@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 from modules.rba_resample_trainer import Net_RBAResample
 from modules.dc_net import AD_DC_Net
-
+from utils.forward_sim import advect_diffuse_forward_simulation
+import numpy as np
 
 class DCPINN_Base(Net_RBAResample):
     """Base class for Darcy-based PINNs wrapping adaptive resampling.
@@ -32,7 +33,37 @@ class DCPINN_Base(Net_RBAResample):
         # self.v_dc_net = ad_dc_net.v_dc_net
         self.learning_rate = learning_rate
         self.L2_loss = nn.MSELoss()
-    
+
+    def validate_forward_step(self, vx, vy, vz, t_index, t_jump):
+        # transfer v back to mm/min, so that time like t_index and t_jump is appropriate.
+        char_domain = self.ad_dc_net.char_domain
+        vx, vy, vz = vx * char_domain.V_star[0], vy * char_domain.V_star[1], vz * char_domain.V_star[2]
+        # visualize how concentration field advects and diffuses in one step
+        # get spatial points at t_index and t_index + 1
+        start_c = self.ad_dc_net.c_net.gt_data[:, :, :, t_index]
+        end_c = self.ad_dc_net.c_net.gt_data[:, :, :, t_index + t_jump]
+        
+        # we are not using training c_dataset (half of whole data), so no need to *2 for duration.
+        t_duration = char_domain.t[t_index + t_jump] - char_domain.t[t_index]  # in min
+        
+        # D is the real diffusion coefficient(tensor with ndim 0 or (nx,ny,nz,3,3)), in mm^2/min
+        if char_domain.DTI_or_coef.ndim == 0:
+            D = self.ad_dc_net.D.detach().cpu().numpy()
+        else:
+            D = char_domain.DTI_or_coef * self.ad_dc_net.D
+            # reshape (1, 9, Nx, Ny, Nz) back to (nx,ny,nz,3,3)
+            D = D.permute(2, 3, 4, 0, 1).reshape(*D.shape[2:], 3, 3).detach().cpu().numpy()
+        num_steps = int(t_duration * 10)  # 0.1 min per step
+        frames = advect_diffuse_forward_simulation(start_c, vx, vy, vz, D, t_duration,
+                                                   num_steps=num_steps,
+                                                   voxel_dims=char_domain.pixdim) # 4 min between frame.
+        z_slice = char_domain.domain_shape[2] // 2
+        
+        # now return a stack of volume slice, start, end and error, ready for tensorboard
+        slices = [frames[0][:,:,z_slice], frames[num_steps//2][:,:,z_slice], 
+                  frames[-1][:,:,z_slice], end_c[:,:,z_slice], (frames[-1]-end_c)[:,:,z_slice]]
+        return np.vstack(slices)  # shape (4, nx, ny)
+
     def validation_step(self, batch, batch_idx):
         # always use DCE-MRI batch for validation
         Xt, _, c_observed = batch
@@ -46,10 +77,14 @@ class DCPINN_Base(Net_RBAResample):
             # FIX: Access sub-modules through the main ad_dc_net module.
             c_vis = self.ad_dc_net.c_net.draw_concentration_slices()
             self.logger.experiment.add_image('val_C_compare', c_vis, self.current_epoch, dataformats='WH')
-            rgb_img, _, _, _ = self.ad_dc_net.v_dc_net.draw_velocity_volume()
+            rgb_img, vx, vy, vz = self.ad_dc_net.v_dc_net.draw_velocity_volume()
             self.logger.experiment.add_image('val_v_quiver', rgb_img, self.current_epoch, dataformats='HWC')
             
-            k_vis = self.ad_dc_net.v_dc_net.k_net.draw_permeability_volume()
+            self.logger.experiment.add_image('val_adv_diff_step', 
+                                             self.validate_forward_step(vx, vy, vz, t_index=len(self.ad_dc_net.char_domain.t) // 4, 
+                                                                        t_jump=3), self.current_epoch, dataformats='WH')
+
+            k_vis = self.ad_dc_net.v_dc_net.k_net.draw_permeability_volume() # shaped (H,W,C)
             self.logger.experiment.add_image('val_K_slices', k_vis, self.current_epoch, dataformats='HWC')
             p_vis = self.ad_dc_net.v_dc_net.p_net.draw_pressure_slices()
             self.logger.experiment.add_image('val_p_slices', p_vis, self.current_epoch, dataformats='HWC')
@@ -142,8 +177,9 @@ class DCPINN_ADPDE_P(DCPINN_Base):
                  learning_rate=1e-3,
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
-                 enable_rbar=True):
-        rba_list = [(DCPINN_ADPDE_P.train_phase, 1.0)]
+                 enable_rbar=True,
+                 advpde_loss_name="ad_pde_p"):
+        rba_list = [(advpde_loss_name, 1.0)]
         self.incompressible = incompressible
         if incompressible:
             rba_list.append(("div_v_residual", div_weight))
@@ -196,7 +232,8 @@ class DCPINN_ADPDE_P_K(DCPINN_ADPDE_P):
                          learning_rate=learning_rate,
                          rba_learning_rate=rba_learning_rate,
                          rba_memory=rba_memory,
-                         enable_rbar=enable_rbar)
+                         enable_rbar=enable_rbar,
+                         advpde_loss_name=DCPINN_ADPDE_P_K.train_phase)
         # Freeze c_net, Unfreeze k_net and p_net
         for c in self.ad_dc_net.c_net.parameters():
             c.requires_grad = False

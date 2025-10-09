@@ -26,13 +26,13 @@ class CharacteristicDomain():
         
         # This is now a utility for the data module, not for get_characteristic_... methods
         self.t_normalized = (t - self.T_offset) / self.T_star
-
+        self.t = t # keep original time array for reference
         self.V_star = self.L_star / self.T_star  # characteristic velocity in grid/unit time
 
 
     def set_DTI_or_coef(self, DTI_or_coef):
-        # if we already using DTI, then we should set Pe = 1.0
-        self.Pe_g = self.V_star.mean() * self.L_star.mean() / (DTI_or_coef if isinstance(DTI_or_coef, float) else 1.0)  # global Peclet number
+        # if we already using DTI, then we should set Pe = 3.0 (water/tracer's diffusivity)
+        self.Pe_g = self.V_star.mean() * self.L_star.mean() / (DTI_or_coef if isinstance(DTI_or_coef, float) else 3.0)  # global Peclet number
         # for better leverage 
         self.DTI_or_coef = torch.tensor(DTI_or_coef, dtype=torch.float32).to(self.device) # either a float (isotropic coeff) tensor or a (nx,ny,nz,3,3) tensor
         if not isinstance(DTI_or_coef, float):

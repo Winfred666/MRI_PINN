@@ -78,9 +78,10 @@ class C_Net(nn.Module):
         base_t = char_domain.domain_shape[3] // 4 * 2
         self.val_slice_t = [base_t - 6, base_t - 3, base_t, base_t + 3]
         self.val_slice_4d = char_domain.get_characteristic_geotimedomain(slice_zindex=self.val_slice_z,
-                                                                       slice_tindex=self.val_slice_t) # (?,4)
+                                                                       slice_tindex=self.val_slice_t) # (6 slice * N,4)
         Z, T = np.meshgrid(self.val_slice_z, self.val_slice_t, indexing='ij')
-        self.val_slice_gt_c = data[:, :, Z, T] / C_star
+        self.gt_data = data / C_star # only for revalidation.
+        self.val_slice_gt_c = self.gt_data[:, :, Z, T]
 
     def forward(self, X_train):
         # Explicitly define the forward pass logic
@@ -104,7 +105,7 @@ class C_Net(nn.Module):
                     vol_disp *= self.char_domain.mask[:, :, self.val_slice_z[i]]
                     c_vis_list.append(visualize_prediction_vs_groundtruth(vol_disp, slice_gt_c))
             return np.hstack(c_vis_list)
-    
+
     # X should be the raw tuple extract from datamodule. D_coef could be number or tensor of shape (N,3,3)
     # using vmap + jacrev to calculate the laplacian, will consume more memory but may be faster
     def get_c_grad_ani_diffusion_full_jcb(self, Xt): # here X is a tuple of (x,y,z,t)

@@ -251,7 +251,12 @@ class AD_DC_Net(nn.Module):
     # Physical diffusion (for logging / visualization) using same scaling heuristic as AD_Net
     @property
     def D(self):
-        return self.D_normalized * (self.char_domain.L_star.mean() * self.char_domain.V_star.mean())
+        # if anisotropic, there is no D_coeff, only D_tensor, and D should be D_normalize which is scaling factor.
+        if self.char_domain.DTI_or_coef.ndim == 0:
+            return self.D_normalized * (self.char_domain.L_star.mean() * self.char_domain.V_star.mean())
+        else:
+            return self.D_normalized # just scaling factor, no physical meaning
+
 
     def forward(self, Xt):
         """
