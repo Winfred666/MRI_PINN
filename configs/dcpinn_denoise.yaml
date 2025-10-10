@@ -6,9 +6,9 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: false
+continue_training: true
 
-ckpt_path: "tb_logs/seqtrain_ADPINN/dcpinn_full_251008_1914/checkpoints/last.ckpt"
+ckpt_path: "tb_logs/seqtrain_ADPINN/dcpinn_full_251009_1607/checkpoints/last.ckpt"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
 dcemrinp_data_path: "data/dataset_downsampled.npz"
@@ -57,24 +57,24 @@ phases:
   #   max_epochs: 4000
   #   batch_size: 280000
 
-  init_c_denoise_data:
-    learning_rate: 0.001
-    max_epochs: 5000
-    batch_size: 280000
+  # init_c_denoise_data:
+  #   learning_rate: 0.001
+  #   max_epochs: 5000
+  #   batch_size: 500000
 
-  init_k_data:
-    learning_rate: 0.001
-    max_epochs: 4000
-    batch_size: 280000
+  # init_k_data:
+  #   learning_rate: 0.001
+  #   max_epochs: 4000
+  #   batch_size: 280000
 
-  init_p_data:
-    learning_rate: 0.001
-    max_epochs: 4000
-    batch_size: 280000
+  # init_p_data:
+  #   learning_rate: 0.001
+  #   max_epochs: 4000
+  #   batch_size: 280000
 
   ad_pde_p:
     learning_rate: 0.001
-    max_epochs: 50000
+    max_epochs: 2
     batch_size: 280000
 
   ad_pde_p_k:

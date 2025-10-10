@@ -74,7 +74,10 @@ class DCPINN_Base(Net_RBAResample):
         val_loss = ((c_pred - c_observed) ** 2).mean()
         if batch_idx == 0:
             self.log('val_data_loss', val_loss)
-            self.log('Diffusivity mm^2/min (scale factor for DTI)', self.ad_dc_net.D)
+            if self.ad_dc_net.char_domain.DTI_or_coef.ndim == 0:
+                self.log('Diffusivity mm^2 per min', self.ad_dc_net.D)
+            else:
+                self.log('Scale factor for DTI', self.ad_dc_net.D)
             # FIX: Access sub-modules through the main ad_dc_net module.
             c_vis = self.ad_dc_net.c_net.draw_concentration_slices()
             self.logger.experiment.add_image('val_C_compare', c_vis, self.current_epoch, dataformats='WH')

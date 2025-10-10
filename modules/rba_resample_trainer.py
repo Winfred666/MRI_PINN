@@ -67,7 +67,8 @@ class Net_RBAResample(L.LightningModule):
 
             if batch_idx == 0:
                 self.log(f'train_{name}_loss', pl.mean())
-
+                
+        self.log('hp_metric', rba_weighted_loss) # for best checkpoint saving
         # 4. Manually optimize
         optimizer = self.optimizers()
         optimizer.zero_grad()

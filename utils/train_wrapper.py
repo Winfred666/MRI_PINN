@@ -10,7 +10,7 @@ def train_all_phases(main_net, trainer_getter, train_config: Train_Config):
     # save every N epochs
     checkpoint_callback_best = ModelCheckpoint(
         filename="pinn-{epoch:04d}",
-        monitor='val_data_loss',
+        monitor='hp_metric',
         save_top_k=2,
         every_n_epochs=train_config.ckpt_save_val_interval
     )
