@@ -85,8 +85,8 @@ class DCPINN_Base(Net_RBAResample):
             self.logger.experiment.add_image('val_v_quiver', rgb_img, self.current_epoch, dataformats='HWC')
             
             self.logger.experiment.add_image('val_adv_diff_step', 
-                                             self.validate_forward_step(vx, vy, vz, t_index=len(self.ad_dc_net.char_domain.t) // 4, 
-                                                                        t_jump=3), self.current_epoch, dataformats='WH')
+                                             self.validate_forward_step(vx, vy, vz, t_index=0, 
+                                                                        t_jump=5), self.current_epoch, dataformats='WH')
             k_vis = self.ad_dc_net.v_dc_net.k_net.draw_permeability_volume() # shaped (H,W,C)
             self.logger.experiment.add_image('val_K_slices', k_vis, self.current_epoch, dataformats='HWC')
             p_vis = self.ad_dc_net.v_dc_net.p_net.draw_pressure_slices()

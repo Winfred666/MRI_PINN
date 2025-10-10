@@ -52,8 +52,9 @@ def train_all_phases(main_net, trainer_getter, train_config: Train_Config):
         batch_size = cfg.get("batch_size", 222_000)
         
         # get correct model and datamodule for the phase
-        pinn_model, datamodule = trainer_getter(phase, main_net, train_config)
-
+        pinn_model, datamodule = trainer_getter(phase, main_net, cfg)
+        if pinn_model is None or datamodule is None:
+            continue
         pinn_model.hparams.learning_rate = lr # Set learning rate for the phase
         pinn_model.train_phase = phase # Tag the model with the current phase for checkpointing
 

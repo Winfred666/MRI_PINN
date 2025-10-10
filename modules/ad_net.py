@@ -122,12 +122,13 @@ class AD_Net(nn.Module):
         self,
         c_layers,
         u_layers,
-        data,C_star,
-        char_domain : CharacteristicDomain,
+        data, C_star,
+        char_domain: CharacteristicDomain,
         freq_nums=(8,8,8,0),
         incompressible=False,
         positional_encoding=True,
         gamma_space=1.0,
+        use_learnable_D=False,  # if False, keep D constant by storing _log_Pe as a buffer
     ):
         super().__init__()
 
@@ -148,9 +149,14 @@ class AD_Net(nn.Module):
             incompressible=incompressible,
             gamma_space=gamma_space,
         )
-        # define learnable diffusivity
-        self._log_Pe = nn.Parameter(torch.log(torch.tensor(char_domain.Pe_g)))
 
+        # when use_learnable_D is False, keep it constant via register_buffer
+        log_Pe_init = torch.log(torch.as_tensor(char_domain.Pe_g, dtype=torch.float32))
+        if use_learnable_D:
+            self.register_buffer("_log_Pe", log_Pe_init)
+        else:
+            self._log_Pe = nn.Parameter(log_Pe_init.clone())
+        
     @property
     def Pe(self):
         """Peclet number, representing the ratio of advection to diffusion."""

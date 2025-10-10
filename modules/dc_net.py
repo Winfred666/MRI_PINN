@@ -215,7 +215,8 @@ class AD_DC_Net(nn.Module):
                  freq_nums=(8,8,8,0),
                  positional_encoding=True,
                  gamma_space=1.0,
-                 anisotropic=False):
+                 anisotropic=False,
+                 use_learnable_D=False):
         super().__init__()
         freq_nums = np.array(freq_nums, dtype=int)
         self.char_domain = char_domain
@@ -237,7 +238,12 @@ class AD_DC_Net(nn.Module):
                                  gamma_space=gamma_space,
                                  anisotropic=anisotropic)
     
-        self._log_Pe = nn.Parameter(torch.log(torch.tensor(char_domain.Pe_g)))
+        log_Pe_init = torch.log(torch.as_tensor(char_domain.Pe_g, dtype=torch.float32))
+        if use_learnable_D:
+            self.register_buffer("_log_Pe", log_Pe_init)
+        else:
+            self._log_Pe = nn.Parameter(log_Pe_init.clone())
+
 
     @property
     def Pe(self):

@@ -38,6 +38,8 @@ class Train_Config:
         self.use_DTI = config.get('use_DTI', False)
         if self.use_DTI:
             self.dti_data_path = config.get('dti_data_path')
+        
+        self.use_learnable_D = config.get('use_learnable_D', False)
 
         # --- RBAR ---
         self.enable_rbar = config.get('enable_rbar', False)

@@ -43,7 +43,20 @@ class CharacteristicDomain():
     def recover_length_tensor(self, L_normalized):
         L_real = L_normalized * self._L_star_tensor + self._L_offset_tensor
         return L_real
+    
+    def recover_length_numpy(self, L_normalized):
+        L_real = L_normalized * self.L_star + self.L_offset
+        return L_real
 
+    def recover_time_numpy(self, T_normalized):
+        T_real = T_normalized * self.T_star + self.T_offset
+        return T_real
+    
+    def recover_time_index(self, T_normalized):
+        T_real = self.recover_time_numpy(T_normalized)
+        # find the corresponding index in self.t
+        return np.searchsorted(self.t, T_real)
+    
     def characterise_length_time(self, L_real, T_real):
         L_normalized = (L_real - self.L_offset) / self.L_star
         T_normalized = (T_real - self.T_offset) / self.T_star

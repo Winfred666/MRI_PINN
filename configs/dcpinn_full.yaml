@@ -28,7 +28,9 @@ positional_encoding:
 
 # --- Physics & PDE Configuration ---
 use_DTI: true
-dti_data_path: "data/dti_sample.nii.gz"
+dti_data_path: "data/KX078_DCE_nii_data/dti_tensor_3_3.mat"
+
+use_learnable_D: false
 # If true, use the Diffusion Tensor Imaging data for anisotropic diffusion.
 # If false, a single learnable isotropic diffusion coefficient is used.
 viscosity: 6.95e-4 
@@ -71,7 +73,10 @@ phases:
   #   learning_rate: 0.001
   #   max_epochs: 4000
   #   batch_size: 280000
-
+  
+  filter:
+    batch_size: 200000
+  
   # ad_pde_p:
   #   learning_rate: 0.001
   #   max_epochs: 2
@@ -79,10 +84,10 @@ phases:
 
   ad_pde_p_k:
     learning_rate: 0.001
-    max_epochs: 2
+    max_epochs: 10000
     batch_size: 280000
 
   joint_data+joint_ad_pde:
     learning_rate: 0.001
-    max_epochs: 50000
+    max_epochs: 10000
     batch_size: 280000
