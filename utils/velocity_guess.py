@@ -59,8 +59,8 @@ def front_tracking_velocity(concentration_data, dt):
                 # Get integer indices for gradient lookup (x, y, z)
                 ix, iy, iz = map(int, p1)
                 
-                # Get the normal vector at P1 (use gradients in x,y,z order)
-                normal = np.array([grad_x[ix, iy, iz], grad_y[ix, iy, iz], grad_z[ix, iy, iz]])
+                # Get the normal vector at P1, pointed outward (use gradients in x,y,z order)
+                normal = -np.array([grad_x[ix, iy, iz], grad_y[ix, iy, iz], grad_z[ix, iy, iz]])
                 norm_mag = np.linalg.norm(normal)
                 
                 if norm_mag < 1e-6: # Avoid division by zero
@@ -131,3 +131,98 @@ def front_tracking_velocity(concentration_data, dt):
     
     
     return initial_velocity_field # shape: (nx, ny, nz, 3)
+
+
+
+
+
+if __name__ == '__main__':
+    import matplotlib.pyplot as plt
+
+    # --- 1. Create a simple 3D example: an expanding sphere ---
+    
+    # Define grid parameters
+    grid_size = 50
+    num_times = 5
+    dt = 1.0  # Time step duration
+
+    # Create a 4D array to hold the concentration data (x, y, z, t)
+    concentration_data = np.zeros((grid_size, grid_size, grid_size, num_times))
+
+    # Define the center of the grid
+    center = np.array([grid_size / 2, grid_size / 2, grid_size / 2])
+
+    # Create coordinate grids
+    x, y, z = np.mgrid[0:grid_size, 0:grid_size, 0:grid_size]
+
+    # Generate the expanding sphere over time
+    print("Generating synthetic data of an expanding sphere...")
+    initial_radius = 8
+    expansion_speed = 2.0 # voxels per time step
+    
+    for t_idx in range(num_times):
+        current_radius = initial_radius + t_idx * expansion_speed
+        # Calculate distance of each voxel from the center
+        distance_from_center = np.sqrt((x - center[0])**2 + (y - center[1])**2 + (z - center[2])**2)
+        
+        # Use a smooth transition (sigmoid) to define the sphere's boundary
+        # This helps marching_cubes and gradient calculations
+        # The concentration goes from ~100 inside to ~0 outside, centered at `current_radius`
+        concentration_data[..., t_idx] = 50 * (1 - np.tanh((distance_from_center - current_radius) / 2.0))
+
+    print("Synthetic data generated.")
+
+    # --- 2. Run the front_tracking_velocity function ---
+    print("Estimating velocity field using front_tracking_velocity...")
+    estimated_velocity = front_tracking_velocity(concentration_data, dt)
+    print("Velocity field estimated.")
+
+    # --- 3. Visualize the results ---
+    
+    # Create a figure with three subplots
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    
+    # --- Plot 1: Concentration at the first time step ---
+    central_slice_idx = grid_size // 2
+    ax = axes[0]
+    im = ax.imshow(concentration_data[:, :, central_slice_idx, 0].T, 
+                   cmap='viridis', origin='lower', extent=[0, grid_size, 0, grid_size])
+    ax.set_title(f'Concentration at t=0 (Z-slice={central_slice_idx})')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    # --- Plot 2: Concentration at the last time step ---
+    ax = axes[1]
+    im = ax.imshow(concentration_data[:, :, central_slice_idx, -1].T, 
+                   cmap='viridis', origin='lower', extent=[0, grid_size, 0, grid_size])
+    ax.set_title(f'Concentration at t={num_times-1} (Z-slice={central_slice_idx})')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    # --- Plot 3: Estimated velocity field (quiver plot) ---
+    ax = axes[2]
+    
+    # Extract velocity components for the central slice
+    u = estimated_velocity[:, :, central_slice_idx, 0]
+    v = estimated_velocity[:, :, central_slice_idx, 1]
+    
+    # Subsample the grid for a cleaner plot
+    subsample = 4
+    x_sub = x[::subsample, ::subsample, central_slice_idx]
+    y_sub = y[::subsample, ::subsample, central_slice_idx]
+    u_sub = u[::subsample, ::subsample]
+    v_sub = v[::subsample, ::subsample]
+
+    # Plot the quiver
+    ax.quiver(x_sub, y_sub, u_sub, v_sub, color='r', scale=25, headwidth=4)
+    ax.set_title(f'Estimated Velocity Field (Z-slice={central_slice_idx})')
+    ax.set_xlabel('X')
+    ax.set_ylabel('Y')
+    ax.set_aspect('equal', adjustable='box')
+    ax.set_xlim(0, grid_size)
+    ax.set_ylim(0, grid_size)
+
+    plt.tight_layout()
+    plt.show()

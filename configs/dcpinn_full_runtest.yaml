@@ -3,12 +3,12 @@
 
 # --- Training Control ---
 # If false, load a model from ckpt_path for inference without training.
-do_training: true
+do_training: false
 
 # If true, resume training from the specified checkpoint.
 continue_training: false
 
-ckpt_path: "tb_logs/seqtrain_ADPINN/dcpinn_full_runtest_251011_1435/checkpoints/last.ckpt"
+ckpt_path: "results/last.ckpt"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
 dcemrinp_data_path: "data/ISO052_DCE_nii_data/dataset_downsampled.npz"
