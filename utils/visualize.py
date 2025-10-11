@@ -149,7 +149,18 @@ def interactive_quiver(vx, vy, vz, pixdim, default_elev=None, default_azim=None)
 
 
 # 2. visualize the slices with mask + thresholding
-def draw_nifti_slices_with_threshold(img, brain_mask=None):
+def draw_nifti_slices_with_threshold(img, brain_mask=None, slice_along_axis='z'):
+    """
+    Interactive viewer for a 3D volume with slice and threshold sliders.
+
+    Parameters:
+        img (np.ndarray): 3D or 4D numpy array. If 4D, the first time point is used.
+        brain_mask (np.ndarray, optional): 3D boolean mask.
+        slice_along_axis (str): The axis to slice along ('x', 'y', or 'z').
+    """
+    if slice_along_axis not in ['x', 'y', 'z']:
+        raise ValueError("slice_along_axis must be one of 'x', 'y', or 'z'")
+
     # Get array (memory-mapped if possible)
     data = img
     vol = data[..., 0] if data.ndim == 4 else data
@@ -160,8 +171,8 @@ def draw_nifti_slices_with_threshold(img, brain_mask=None):
     
     vmin, vmax = 0, 1 # Default values
     if finite_mask.any():
-        vmin = np.percentile(v[finite_mask], 1.0)
-        vmax = np.percentile(v[finite_mask], 99.0)
+        vmin = np.percentile(v[finite_mask], 0.0)
+        vmax = np.percentile(v[finite_mask], 100.0)
         vmax = vmin + 1e-8 if vmax <= vmin else vmax
         vol_disp = np.clip((v - vmin) / (vmax - vmin), 0, 1.0)
     else:
@@ -169,15 +180,26 @@ def draw_nifti_slices_with_threshold(img, brain_mask=None):
 
     # If a brain mask is provided, apply it to the display volume
     if brain_mask is not None:
+        assert brain_mask.shape == vol.shape, "Mask shape must match volume shape"
         vol_disp = vol_disp * brain_mask
 
-    def view_slice(z=0, thr=0.5):
+    # --- Axis-dependent setup ---
+    axis_map = {'x': 0, 'y': 1, 'z': 2}
+    slice_axis_idx = axis_map[slice_along_axis]
+    slice_max = vol.shape[slice_axis_idx] - 1
+
+    def view_slice(slice_idx=0, thr=0.5):
         plt.figure(figsize=(6, 6))
 
+        # Create a slicer for the chosen axis
+        slicer = [slice(None)] * 3
+        slicer[slice_axis_idx] = slice_idx
+        slicer = tuple(slicer)
+
         # Display image is normalized for consistent colormapping
-        slice_disp_img = vol_disp[:, :, z].T
+        slice_disp_img = vol_disp[slicer].T
         # Original data slice for absolute thresholding
-        slice_orig_img = v[:, :, z].T
+        slice_orig_img = v[slicer].T
 
         # Threshold mask is now on original data
         roi_mask = slice_orig_img > thr
@@ -187,19 +209,26 @@ def draw_nifti_slices_with_threshold(img, brain_mask=None):
         plt.imshow(np.ma.masked_where(~roi_mask, roi_mask), 
                    cmap="autumn", alpha=0.5, origin="lower", interpolation="nearest")
         plt.axis("off")
-        plt.title(f"Slice z={z}, threshold={thr:.2f}")
+        plt.title(f"Slice {slice_along_axis}={slice_idx}, threshold={thr:.2f}")
         plt.show()
 
-    _ = interact(
-        view_slice,
-        z=widgets.IntSlider(min=0, max=int(vol_disp.shape[2]) - 1, step=1, value=int(vol_disp.shape[2]) // 2),
-        thr=widgets.FloatSlider(min=vmin, max=vmax, step=(vmax-vmin)/100, value=(vmin+vmax)/2, description='Abs Thr')
+    # Create the interactive widget for the chosen slice axis
+    slice_slider = widgets.IntSlider(
+        min=0, max=slice_max, step=1, value=slice_max // 2,
+        description=f'Slice {slice_along_axis.upper()}'
     )
+    
+    interact_kwargs = {
+        'slice_idx': slice_slider,
+        'thr': widgets.FloatSlider(min=vmin, max=vmax, step=(vmax-vmin)/100, value=(vmin+vmax)/2, description='Abs Thr')
+    }
+
+    _ = interact(view_slice, **interact_kwargs)
 
 
 # draw nifti_slices, with a timeline slider instead of threshold
-def draw_nifti_slices_with_time(pred_imgs, gt_imgs=None, brain_mask=None, normalize='global', percentiles=(1, 99),
-                                cmap='gray', transpose_xy=True, overlay_cmap='autumn'):
+def draw_nifti_slices_with_time(pred_imgs, gt_imgs=None, brain_mask=None, normalize='global', percentiles=(1, 99.5),
+                                cmap='gray', transpose_xy=True, overlay_cmap='autumn', slice_along_axis='z'):
     """
     Interactive viewer for 4D volume (x,y,z,t) with time, z, and threshold sliders.
 
@@ -212,59 +241,80 @@ def draw_nifti_slices_with_time(pred_imgs, gt_imgs=None, brain_mask=None, normal
       cmap          : base colormap
       transpose_xy  : transpose slice for display
       overlay_cmap  : colormap for threshold overlay
+      slice_along_axis: 'x', 'y', or 'z'. The axis to slice along.
     """
+    if slice_along_axis not in ['x', 'y', 'z']:
+        raise ValueError("slice_along_axis must be one of 'x', 'y', or 'z'")
 
-    # Now as predict images and gt images are x,y,z,t,
-    # with same z and t, we hstack (x,y) to form a bigger image
     X, Y, Z, T = pred_imgs.shape
     if brain_mask is not None:
         assert brain_mask.shape == (X, Y, Z)
         pred_imgs = pred_imgs * brain_mask[..., None]
-    if gt_imgs is not None:
-        imgs = np.concatenate([gt_imgs, pred_imgs, np.abs(pred_imgs - gt_imgs)], axis=0)
-    else:
-        imgs = pred_imgs
-    X, Y, Z, T = imgs.shape
-    assert imgs.ndim == 4, "imgs must be 4D (x,y,z,t)"
     
-    data = imgs.astype(np.float32, copy=False)
+    # Keep pred and gt separate until slicing
+    data_pred = pred_imgs.astype(np.float32, copy=False)
+    data_gt = gt_imgs.astype(np.float32, copy=False) if gt_imgs is not None else None
 
-    finite_mask = np.isfinite(data)
+    # Determine normalization range from all available data
+    all_data_for_norm = np.concatenate([d for d in [data_pred, data_gt] if d is not None], axis=0)
+    finite_mask = np.isfinite(all_data_for_norm)
     if not finite_mask.any():
         raise ValueError("No finite voxels found.")
 
     low_p, high_p = percentiles
     if normalize == 'global':
-        vmin = np.percentile(data[finite_mask], low_p)
-        vmax = np.percentile(data[finite_mask], high_p)
-        vmax = vmin + 1e-8 if vmax <= vmin else vmax
-        normed = np.clip((data - vmin) / (vmax - vmin), 0, 1)
-    else:
-        normed = np.empty_like(data)
-        for ti in range(T):
-            frame = data[..., ti]
-            fm = np.isfinite(frame)
-            if fm.any():
-                vmin = np.percentile(frame[fm], low_p)
-                vmax = np.percentile(frame[fm], high_p)
-                vmax = vmin + 1e-8 if vmax <= vmin else vmax
-                normed[..., ti] = np.clip((frame - vmin) / (vmax - vmin), 0, 1)
-            else:
-                normed[..., ti] = frame
+        vmin = np.percentile(all_data_for_norm[finite_mask], low_p)
+        vmax = np.percentile(all_data_for_norm[finite_mask], high_p)
+    else: # Placeholder for per-time, which is more complex with combined images
+        vmin, vmax = np.percentile(all_data_for_norm[finite_mask], [low_p, high_p])
+    vmax = vmin + 1e-8 if vmax <= vmin else vmax
+
+    # --- Axis-dependent setup ---
+    axis_map = {'x': 0, 'y': 1, 'z': 2}
+    slice_axis_idx = axis_map[slice_along_axis]
+    
+    # Determine slice dimensions and slider range
+    slice_dims = [X, Y, Z]
+    slice_max = slice_dims.pop(slice_axis_idx) - 1
+    slice_dim_labels = ['X', 'Y', 'Z']
+    slice_dim_labels.pop(slice_axis_idx)
 
     # Initial indices
-    t0, z0 = 0, Z // 2
-    base_slice = normed[:, :, z0, t0]
-    if transpose_xy:
-        base_slice = base_slice.T
+    t0 = 0
+    slice0 = slice_max // 2
 
-    fig, ax = plt.subplots(figsize=(5, 5))
-    img_artist = ax.imshow(base_slice, cmap=cmap,
+    def get_slice(data_4d, t, slice_idx):
+        if data_4d is None: return None
+        # Use slicing to extract the 2D plane
+        slicer = [slice(None)] * 4
+        slicer[slice_axis_idx] = slice_idx
+        slicer[3] = t
+        return data_4d[tuple(slicer)]
+
+    def get_combined_slice(t, slice_idx):
+        pred_slice = get_slice(data_pred, t, slice_idx)
+        if data_gt is not None:
+            gt_slice = get_slice(data_gt, t, slice_idx)
+            err_slice = np.abs(pred_slice - gt_slice)
+            # Stack horizontally
+            return np.hstack([gt_slice, pred_slice, err_slice])
+        return pred_slice
+
+    # Get initial slice for setup
+    base_slice_original = get_combined_slice(t0, slice0)
+    base_slice_normed = np.clip((base_slice_original - vmin) / (vmax - vmin), 0, 1)
+    
+    if transpose_xy:
+        base_slice_normed = base_slice_normed.T
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    img_artist = ax.imshow(base_slice_normed, cmap=cmap,
                            origin='lower' if transpose_xy else 'upper',
                            interpolation='nearest')
 
-    # Initial threshold overlay (empty until first update)
-    roi_mask = base_slice > 0.5
+    # Initial threshold overlay
+    roi_mask = base_slice_original > ((vmin + vmax) / 2)
+    if transpose_xy: roi_mask = roi_mask.T
     overlay_artist = ax.imshow(
         np.ma.masked_where(~roi_mask, roi_mask),
         cmap=overlay_cmap, alpha=0.5,
@@ -272,29 +322,24 @@ def draw_nifti_slices_with_time(pred_imgs, gt_imgs=None, brain_mask=None, normal
         interpolation='nearest'
     )
 
-    ax.set_title(f"t={t0}/{T-1}, z={z0}/{Z-1}, thr=0.50")
+    ax.set_title(f"t={t0}/{T-1}, {slice_along_axis}={slice0}/{slice_max}, thr=0.50")
     ax.axis('off')
     plt.tight_layout()
 
     # Custom formatter to show original data values on hover
     def formatter(x, y):
-        # Get current slider values
-        z = z_slider.value
         t = t_slider.value
+        slice_val = slice_slider.value
 
-        # Round hover coordinates to get pixel indices
-        col = int(x + 0.5)
-        row = int(y + 0.5)
-
-        # Get the original, un-normalized slice
-        original_slice = data[:, :, z, t]
+        col, row = int(x + 0.5), int(y + 0.5)
+        
+        original_slice = get_combined_slice(t, slice_val)
         if transpose_xy:
             original_slice = original_slice.T
 
-        # Check if cursor is within image bounds
         if 0 <= row < original_slice.shape[0] and 0 <= col < original_slice.shape[1]:
             val = original_slice[row, col]
-            return f'x={x:.1f}, y={y:.1f}, value={val:.4f}'
+            return f'({slice_dim_labels[0]}, {slice_dim_labels[1]}) = ({x:.1f}, {y:.1f}), value={val:.4f}'
         else:
             return f'x={x:.1f}, y={y:.1f}'
 
@@ -302,45 +347,44 @@ def draw_nifti_slices_with_time(pred_imgs, gt_imgs=None, brain_mask=None, normal
 
     # Sliders
     t_slider  = widgets.IntSlider(min=0, max=T-1, step=1, value=t0, description='Time')
-    z_slider  = widgets.IntSlider(min=0, max=Z-1, step=1, value=z0, description='Z')
-    # Use absolute value range for the threshold slider
+    slice_slider = widgets.IntSlider(min=0, max=slice_max, step=1, value=slice0, description=f'Slice {slice_along_axis.upper()}')
     thr_slider = widgets.FloatSlider(min=vmin, max=vmax, step=(vmax-vmin)/100, value=(vmin+vmax)/2, description='Abs Thr')
 
     def update(_):
         t = t_slider.value
-        z = z_slider.value
-        thr = thr_slider.value # This is now an absolute value
-        
-        # Normalized slice for display
-        sl_normed = normed[:, :, z, t]
-        # Original data slice for thresholding
-        sl_original = data[:, :, z, t]
+        slice_idx = slice_slider.value
+        thr = thr_slider.value
+
+        sl_original = get_combined_slice(t, slice_idx)
+        sl_normed = np.clip((sl_original - vmin) / (vmax - vmin), 0, 1)
 
         if transpose_xy:
             sl_normed = sl_normed.T
             sl_original = sl_original.T
 
         img_artist.set_data(sl_normed)
+        img_artist.set_extent((0, sl_normed.shape[1], 0, sl_normed.shape[0]))
 
-        # Apply threshold to original data
         mask = sl_original > thr
         overlay_artist.set_data(np.ma.masked_where(~mask, mask))
-        ax.set_title(f"t={t}/{T-1}, z={z}/{Z-1}, thr={thr:.2f}")
+        overlay_artist.set_extent((0, sl_normed.shape[1], 0, sl_normed.shape[0]))
+        
+        ax.set_title(f"t={t}/{T-1}, {slice_along_axis}={slice_idx}/{slice_max}, thr={thr:.2f}")
         fig.canvas.draw_idle()
 
     t_slider.observe(update, names='value')
-    z_slider.observe(update, names='value')
+    slice_slider.observe(update, names='value')
     thr_slider.observe(update, names='value')
 
     ui = widgets.VBox([
-        widgets.HBox([t_slider, z_slider, thr_slider]),
+        widgets.HBox([t_slider, slice_slider, thr_slider]),
         fig.canvas
     ])
     display(ui)
     return {
         "figure": fig,
         "time_slider": t_slider,
-        "z_slider": z_slider,
+        "slice_slider": slice_slider,
         "thr_slider": thr_slider,
         "image_artist": img_artist,
         "overlay_artist": overlay_artist

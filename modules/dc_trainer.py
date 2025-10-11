@@ -3,6 +3,7 @@ import torch.nn as nn
 from modules.rba_resample_trainer import Net_RBAResample
 from modules.dc_net import AD_DC_Net
 from utils.forward_sim import advect_diffuse_forward_simulation
+from utils.visualize import draw_colorful_slice_image
 import numpy as np
 
 class DCPINN_Base(Net_RBAResample):
@@ -73,22 +74,39 @@ class DCPINN_Base(Net_RBAResample):
             c_pred = self.ad_dc_net.c_net(x_full)
         val_loss = ((c_pred - c_observed) ** 2).mean()
         if batch_idx == 0:
+
+            # 1. scalar: data loss and diffusivity
             self.log('val_data_loss', val_loss)
             if self.ad_dc_net.char_domain.DTI_or_coef.ndim == 0:
                 self.log('Diffusivity mm^2 per min', self.ad_dc_net.D)
             else:
                 self.log('Scale factor for DTI', self.ad_dc_net.D)
-            # FIX: Access sub-modules through the main ad_dc_net module.
+            
+            # 2. visualize c slices and v quiver
             c_vis = self.ad_dc_net.c_net.draw_concentration_slices()
             self.logger.experiment.add_image('val_C_compare', c_vis, self.current_epoch, dataformats='WH')
             rgb_img, vx, vy, vz = self.ad_dc_net.v_dc_net.draw_velocity_volume()
             self.logger.experiment.add_image('val_v_quiver', rgb_img, self.current_epoch, dataformats='HWC')
             
+            # 2. Also calculate the norm of velocity field, slice at bottom of x domain to see willis ring
+            v_mag = torch.sqrt(vx**2 + vy**2 + vz**2).reshape(self.ad_dc_net.char_domain.domain_shape[:3])
+            slices_to_log = [58, 61, 63]
+            slice_images = []
+            for z_slice_idx in slices_to_log:
+                v_slice = v_mag[:, :, z_slice_idx].detach().cpu().numpy().T
+                slice_img_whc = draw_colorful_slice_image(v_slice, 'jet')
+                slice_images.append(slice_img_whc)
+            combined_slices_img = np.concatenate(slice_images, axis=1)
+            self.logger.experiment.add_image('val_v_mag_slices', combined_slices_img, self.current_epoch, dataformats='HWC')
+            
+            # 3. visualize one adv-diff step
             self.logger.experiment.add_image('val_adv_diff_step', 
                                              self.validate_forward_step(vx, vy, vz, t_index=0, 
-                                                                        t_jump=5), self.current_epoch, dataformats='WH')
+                                                                        t_jump=6), self.current_epoch, dataformats='WH')
+            # 4. visualize k and p slices
             k_vis = self.ad_dc_net.v_dc_net.k_net.draw_permeability_volume() # shaped (H,W,C)
-            self.logger.experiment.add_image('val_K_slices', k_vis, self.current_epoch, dataformats='HWC')
+            self.logger.experiment.add_image('val_k_slices', k_vis, self.current_epoch, dataformats='HWC')
+
             p_vis = self.ad_dc_net.v_dc_net.p_net.draw_pressure_slices()
             self.logger.experiment.add_image('val_p_slices', p_vis, self.current_epoch, dataformats='HWC')
 

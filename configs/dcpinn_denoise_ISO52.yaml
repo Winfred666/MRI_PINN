@@ -6,12 +6,12 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: true
+continue_training: false
 
 ckpt_path: "tb_logs/seqtrain_ADPINN/dcpinn_full_251009_1607/checkpoints/last.ckpt"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
-dcemrinp_data_path: "data/dataset_downsampled.npz"
+dcemrinp_data_path: "data/ISO052_DCE_nii_data/ISO052_DCE_nii_data/dataset_downsampled.npz"
 
 # Path to the checkpoint file for continuing training or for inference.
 
@@ -29,7 +29,7 @@ cuda_visible_devices: [1]
 
 # --- Physics & PDE Configuration ---
 use_DTI: true
-dti_data_path: "data/KX078_DCE_nii_data/dti_tensor_3_3.mat"
+dti_data_path: "data/ISO052_DCE_nii_data/dti_tensor_3_3.mat"
 
 use_learnable_D: false
 # If true, use the Diffusion Tensor Imaging data for anisotropic diffusion.
@@ -48,7 +48,7 @@ reload_dataloaders_every_n_epochs: 100
 ckpt_save_val_interval: 100
 # How often to run validation and save checkpoints (in epochs).
 
-dataset_num_workers: 20
+dataset_num_workers: 16
 # Number of worker processes for loading data.
 
 # --- Training Phases ---
@@ -57,36 +57,37 @@ phases:
   # init_c_data:
   #   learning_rate: 0.0005
   #   max_epochs: 4000
-  #   batch_size: 280000
+  #   batch_size: 200000
 
-  # init_c_denoise_data:
-  #   learning_rate: 0.001
-  #   max_epochs: 5000
-  #   batch_size: 500000
+  init_c_denoise_data:
+    learning_rate: 0.002
+    max_epochs: 4000
+    batch_size: 200000
 
-  # init_k_data:
-  #   learning_rate: 0.001
-  #   max_epochs: 4000
-  #   batch_size: 280000
+  init_k_data:
+    learning_rate: 0.002
+    max_epochs: 4000
+    batch_size: 200000
 
-  # init_p_data:
-  #   learning_rate: 0.001
-  #   max_epochs: 4000
-  #   batch_size: 280000
+  init_p_data:
+    learning_rate: 0.002
+    max_epochs: 4000
+    batch_size: 200000
+
   filter:
     batch_size: 200000
   
   ad_pde_p:
-    learning_rate: 0.001
-    max_epochs: 2
-    batch_size: 280000
+    learning_rate: 0.002
+    max_epochs: 6000
+    batch_size: 200000
 
   ad_pde_p_k:
     learning_rate: 0.001
-    max_epochs: 10000
-    batch_size: 280000
+    max_epochs: 6000
+    batch_size: 200000
 
   joint_data+joint_ad_pde:
     learning_rate: 0.001
-    max_epochs: 10000
-    batch_size: 280000
+    max_epochs: 6000
+    batch_size: 200000

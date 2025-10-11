@@ -71,12 +71,16 @@ def train_all_phases(main_net, trainer_getter, train_config: Train_Config):
         
         if continue_training_from_ckpt:
             pinn_model.load_state_dict(checkpoint['state_dict'], strict=continue_training_from_ckpt_strict)
+            continue_training_from_ckpt = False # only use for the first phase
+            continue_training_from_ckpt_strict = False # only use for the first phase
 
         # WARNING: here direcly continue training from checkpoint if specified and last_model is None
         trainer.fit(
             pinn_model, 
-            datamodule=datamodule)
-        
+            datamodule=datamodule,
+            ckpt_path=train_config.ckpt_path if continue_training_from_ckpt_strict else None
+        )
+
         ckpt_name = f"{train_config.result_folder}/adpinn_{phase}.pth"
         trainer.save_checkpoint(ckpt_name)
         

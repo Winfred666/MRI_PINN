@@ -151,11 +151,11 @@ class V_DC_Net(nn.Module):
         self.grid_tensor = char_domain.get_characteristic_geodomain().to(torch.float32)
 
     def forward(self, X):
-        # X: (N,3) -> use spatial part only
-        X.requires_grad_(True)
-                # Temporarily enable gradient tracking to compute grad_p, even if
         # this forward pass is called within a torch.no_grad() block.
         with torch.enable_grad():
+            # X: (N,3) -> use spatial part only
+            X.requires_grad_(True)
+            # Temporarily enable gradient tracking to compute grad_p, even if
             p = self.p_net(X)  # (N,1)
             grad_p = torch.autograd.grad(p, X, grad_outputs=torch.ones_like(p),
                                          create_graph=True)[0]  # (N,3)

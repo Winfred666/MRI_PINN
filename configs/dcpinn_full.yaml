@@ -11,7 +11,7 @@ continue_training: true
 ckpt_path: "tb_logs/seqtrain_ADPINN/dcpinn_full_251009_1607/checkpoints/last.ckpt"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
-dcemrinp_data_path: "data/dataset_downsampled.npz"
+dcemrinp_data_path: "data/ISO052_DCE_nii_data/dataset_downsampled.npz"
 
 # Path to the checkpoint file for continuing training or for inference.
 
