@@ -175,6 +175,7 @@ class V_DC_Net(nn.Module):
         if X.shape[-1] == 4:
             X = X[:, :3]
         vx, vy, vz = self.forward(X)
+        # need retain_graph True to allow multiple calls within same graph (e.g. in pde_residual)
         v_grad_x = torch.autograd.grad(vx, X, grad_outputs=torch.ones_like(vx),
                                         retain_graph=True)[0]
         v_grad_y = torch.autograd.grad(vy, X, grad_outputs=torch.ones_like(vy),

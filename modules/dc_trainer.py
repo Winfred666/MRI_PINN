@@ -89,11 +89,12 @@ class DCPINN_Base(Net_RBAResample):
             self.logger.experiment.add_image('val_v_quiver', rgb_img, self.current_epoch, dataformats='HWC')
             
             # 2. Also calculate the norm of velocity field, slice at bottom of x domain to see willis ring
-            v_mag = torch.sqrt(vx**2 + vy**2 + vz**2).reshape(self.ad_dc_net.char_domain.domain_shape[:3])
-            slices_to_log = [58, 61, 63]
+            v_mag = np.sqrt(vx**2 + vy**2 + vz**2).reshape(self.ad_dc_net.char_domain.domain_shape[:3])
+            slices_to_log = [10,15]
+            # slices_to_log = [58, 61, 63]
             slice_images = []
             for z_slice_idx in slices_to_log:
-                v_slice = v_mag[:, :, z_slice_idx].detach().cpu().numpy().T
+                v_slice = v_mag[z_slice_idx, :, :].T
                 slice_img_whc = draw_colorful_slice_image(v_slice, 'jet')
                 slice_images.append(slice_img_whc)
             combined_slices_img = np.concatenate(slice_images, axis=1)

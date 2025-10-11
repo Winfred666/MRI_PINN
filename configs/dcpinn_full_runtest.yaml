@@ -6,9 +6,9 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: true
+continue_training: false
 
-ckpt_path: "results/last.ckpt"
+ckpt_path: "tb_logs/seqtrain_ADPINN/dcpinn_full_runtest_251011_1435/checkpoints/last.ckpt"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
 dcemrinp_data_path: "data/ISO052_DCE_nii_data/dataset_downsampled.npz"
@@ -30,11 +30,11 @@ cuda_visible_devices: [0]
 # --- Physics & PDE Configuration ---
 use_DTI: true
 dti_data_path: "data/ISO052_DCE_nii_data/dti_tensor_3_3.mat"
-
 use_learnable_D: false
 # If true, use the Diffusion Tensor Imaging data for anisotropic diffusion.
 # If false, a single learnable isotropic diffusion coefficient is used.
 viscosity: 6.95e-4 
+
 
 # --- RBAR (Residual-Based Attention Resampling) ---
 enable_rbar: true
@@ -42,10 +42,10 @@ enable_rbar: true
 # This can slow down training epochs but may lead to faster convergence.
 
 # --- Dataloader & Checkpointing Settings ---
-reload_dataloaders_every_n_epochs: 2
+reload_dataloaders_every_n_epochs: 4
 # How often to re-evaluate RBAR weights. Set to 0 if RBAR is disabled.
 
-ckpt_save_val_interval: 2
+ckpt_save_val_interval: 4
 # How often to run validation and save checkpoints (in epochs).
 
 dataset_num_workers: 16
@@ -54,40 +54,43 @@ dataset_num_workers: 16
 # --- Training Phases ---
 # Define the sequence of training stages. The keys determine the order.
 phases:
-  init_c_data:
-    learning_rate: 0.0005
-    max_epochs: 2
-    batch_size: 20000
+  # init_c_data:
+  #   learning_rate: 0.01
+  #   max_epochs: 5
+  #   batch_size: 20000
 
-  init_c_denoise_data:
-    learning_rate: 0.002
-    max_epochs: 2
-    batch_size: 20000
+  # init_c_denoise_data:
+  #   learning_rate: 0.01
+  #   max_epochs: 5
+  #   batch_size: 20000
 
-  init_k_data:
-    learning_rate: 0.002
-    max_epochs: 2
-    batch_size: 20000
+  # init_k_data:
+  #   learning_rate: 0.01
+  #   max_epochs: 5
+  #   batch_size: 20000
 
-  init_p_data:
-    learning_rate: 0.002
-    max_epochs: 2
-    batch_size: 20000
+  # init_p_data:
+  #   learning_rate: 0.01
+  #   max_epochs: 5
+  #   batch_size: 20000
 
-  filter:
-    batch_size: 20000
+  # filter:
+  #   batch_size: 20000
   
   ad_pde_p:
+    incompressible: true
     learning_rate: 0.002
-    max_epochs: 2
+    max_epochs: 5
     batch_size: 20000
 
   ad_pde_p_k:
+    incompressible: true
     learning_rate: 0.001
-    max_epochs: 2
+    max_epochs: 5
     batch_size: 20000
 
   joint_data+joint_ad_pde:
+    incompressible: true
     learning_rate: 0.001
     max_epochs: 10
     batch_size: 20000
