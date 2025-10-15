@@ -25,8 +25,9 @@ class Train_Config:
         self.dcemrinp_data_path = config.get('dcemrinp_data_path')
 
         # --- Model Architecture ---
-        self.neuron_num = config.get('neuron_num', 128)
-        self.hid_layer_num = config.get('hid_layer_num', 8)
+        self.neuron_num = config.get('neuron_num', 150)
+        self.hid_layer_num = config.get('hid_layer_num', 5)
+        self.c_neuron_num = config.get('c_neuron_num', 200)
 
         # --- Feature Engineering ---
         pe_config = config.get('positional_encoding', {})

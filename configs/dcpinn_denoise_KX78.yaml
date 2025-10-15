@@ -17,6 +17,7 @@ dcemrinp_data_path: "data/KX078_DCE_nii_data/dataset_downsampled.npz"
 
 # --- Model Architecture ---
 neuron_num: 150
+c_neuron_num: 200
 hid_layer_num: 5
 
 # --- Feature Engineering ---
@@ -32,6 +33,9 @@ use_DTI: true
 dti_data_path: "data/KX078_DCE_nii_data/dti_tensor_3_3.mat"
 
 use_learnable_D: false
+
+incompressible: true
+
 # If true, use the Diffusion Tensor Imaging data for anisotropic diffusion.
 # If false, a single learnable isotropic diffusion coefficient is used.
 viscosity: 6.95e-4 
@@ -57,37 +61,37 @@ phases:
   # init_c_data:
   #   learning_rate: 0.0005
   #   max_epochs: 4000
-  #   batch_size: 280000
+  #   batch_size: 200000
 
   init_c_denoise_data:
     learning_rate: 0.002
-    max_epochs: 5000
-    batch_size: 250000
+    max_epochs: 8000
+    batch_size: 400000
 
   init_k_data:
     learning_rate: 0.002
     max_epochs: 4000
-    batch_size: 200000
+    batch_size: 400000
 
   init_p_data:
     learning_rate: 0.002
-    max_epochs: 4000
-    batch_size: 200000
+    max_epochs: 1500
+    batch_size: 400000
 
   filter:
     batch_size: 200000
   
   ad_pde_p:
-    learning_rate: 0.002
+    learning_rate: 0.0005
     max_epochs: 6000
     batch_size: 200000
 
   ad_pde_p_k:
-    learning_rate: 0.001
+    learning_rate: 0.0005
     max_epochs: 6000
     batch_size: 200000
 
   joint_data+joint_ad_pde:
-    learning_rate: 0.001
+    learning_rate: 0.0005
     max_epochs: 6000
     batch_size: 200000

@@ -90,8 +90,8 @@ class DCPINN_Base(Net_RBAResample):
             
             # 2. Also calculate the norm of velocity field, slice at bottom of x domain to see willis ring
             v_mag = np.sqrt(vx**2 + vy**2 + vz**2).reshape(self.ad_dc_net.char_domain.domain_shape[:3])
-            # slices_to_log = [10,15]
-            slices_to_log = [41, 43, 45]
+            slices_to_log = [10, 15]
+            # slices_to_log = [41, 43, 45]
             slice_images = []
             for z_slice_idx in slices_to_log:
                 v_slice = v_mag[z_slice_idx, :, :].T
@@ -196,7 +196,7 @@ class DCPINN_ADPDE_P(DCPINN_Base):
                  ad_dc_net: AD_DC_Net,
                  num_train_points,
                  incompressible=False,
-                 div_weight=1.0,
+                 div_weight=0.001,
                  learning_rate=1e-3,
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
@@ -243,7 +243,7 @@ class DCPINN_ADPDE_P_K(DCPINN_ADPDE_P):
                  ad_dc_net: AD_DC_Net,
                  num_train_points,
                  incompressible=False,
-                 div_weight=1.0,
+                 div_weight=0.005,
                  learning_rate=1e-3,
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
@@ -280,7 +280,7 @@ class DCPINN_Joint(DCPINN_Base):
                  incompressible=False,
                  data_weight=1.0,
                  pde_weight=10.0,
-                 div_weight=1.0,
+                 div_weight=0.01,
                  learning_rate=1e-3,
                  rba_learning_rate=0.1,
                  rba_memory=0.999,

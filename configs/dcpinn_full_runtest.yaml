@@ -3,7 +3,7 @@
 
 # --- Training Control ---
 # If false, load a model from ckpt_path for inference without training.
-do_training: false
+do_training: true
 
 # If true, resume training from the specified checkpoint.
 continue_training: false
@@ -11,12 +11,13 @@ continue_training: false
 ckpt_path: "results/last.ckpt"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
-dcemrinp_data_path: "data/ISO052_DCE_nii_data/dataset_downsampled.npz"
+dcemrinp_data_path: "data/KX078_DCE_nii_data/dataset_downsampled.npz"
 
 # Path to the checkpoint file for continuing training or for inference.
 
 # --- Model Architecture ---
 neuron_num: 150
+c_neuron_num: 200
 hid_layer_num: 5
 
 # --- Feature Engineering ---
@@ -29,8 +30,11 @@ cuda_visible_devices: [0]
 
 # --- Physics & PDE Configuration ---
 use_DTI: true
-dti_data_path: "data/ISO052_DCE_nii_data/dti_tensor_3_3.mat"
+dti_data_path: "data/KX078_DCE_nii_data/dti_tensor_3_3.mat"
 use_learnable_D: false
+
+incompressible: true
+
 # If true, use the Diffusion Tensor Imaging data for anisotropic diffusion.
 # If false, a single learnable isotropic diffusion coefficient is used.
 viscosity: 6.95e-4 
@@ -48,7 +52,7 @@ reload_dataloaders_every_n_epochs: 4
 ckpt_save_val_interval: 4
 # How often to run validation and save checkpoints (in epochs).
 
-dataset_num_workers: 16
+dataset_num_workers: 8
 # Number of worker processes for loading data.
 
 # --- Training Phases ---
@@ -79,18 +83,18 @@ phases:
   
   ad_pde_p:
     incompressible: true
-    learning_rate: 0.002
+    learning_rate: 0.001
     max_epochs: 5
-    batch_size: 20000
+    batch_size: 2000
 
   ad_pde_p_k:
     incompressible: true
     learning_rate: 0.001
     max_epochs: 5
-    batch_size: 20000
+    batch_size: 2000
 
   joint_data+joint_ad_pde:
     incompressible: true
     learning_rate: 0.001
     max_epochs: 10
-    batch_size: 20000
+    batch_size: 2000
