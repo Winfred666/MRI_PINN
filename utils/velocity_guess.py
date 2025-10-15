@@ -15,7 +15,7 @@ def front_tracking_velocity(concentration_data, dt):
     sparse_velocities = []
 
     # STEP 1: Choose front values(already scale to )
-    front_values = [30, 40] # Example concentration levels
+    front_values = [12, 20, 40] # Example concentration levels
 
     # Loop over time and fronts
     for t_idx in range(num_times - 1):

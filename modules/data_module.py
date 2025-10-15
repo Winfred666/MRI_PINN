@@ -215,7 +215,7 @@ class VelocityDataModule(RBAResampleDataModule):
         # setting spatial self.points list.
         super().__init__(char_domain, batch_size, num_workers, device)
         self.input_dim = 3  # (x,y,z)
-        # convert to normalized unit
+        # convert to normalized unit(so velocity should be in grid/mm)
         self.velocity = velocity * (char_domain.pixdim / char_domain.V_star)
         self.num_train_points = self.num_points
 

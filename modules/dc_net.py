@@ -241,9 +241,9 @@ class AD_DC_Net(nn.Module):
     
         log_Pe_init = torch.log(torch.as_tensor(char_domain.Pe_g, dtype=torch.float32))
         if use_learnable_D:
-            self.register_buffer("_log_Pe", log_Pe_init)
-        else:
             self._log_Pe = nn.Parameter(log_Pe_init.clone())
+        else:
+            self.register_buffer("_log_Pe", log_Pe_init)
 
 
     @property
