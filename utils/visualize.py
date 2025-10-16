@@ -297,7 +297,7 @@ def draw_nifti_slices_with_time(pred_imgs, gt_imgs=None, brain_mask=None, normal
             gt_slice = get_slice(data_gt, t, slice_idx)
             err_slice = np.abs(pred_slice - gt_slice)
             # Stack horizontally
-            return np.hstack([gt_slice, pred_slice, err_slice])
+            return np.vstack([gt_slice, pred_slice, err_slice])
         return pred_slice
 
     # Get initial slice for setup
@@ -307,7 +307,7 @@ def draw_nifti_slices_with_time(pred_imgs, gt_imgs=None, brain_mask=None, normal
     if transpose_xy:
         base_slice_normed = base_slice_normed.T
 
-    fig, ax = plt.subplots(figsize=(8, 4))
+    fig, ax = plt.subplots(figsize=(6, 4))
     img_artist = ax.imshow(base_slice_normed, cmap=cmap,
                            origin='lower' if transpose_xy else 'upper',
                            interpolation='nearest')

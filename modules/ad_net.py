@@ -27,7 +27,7 @@ class V_Net(nn.Module):
         self.incompressible = incompressible
         self.char_domain = char_domain
         # precompute spatial grid (Nxyz,3)
-        self.grid_tensor = char_domain.get_characteristic_geodomain().to(torch.float32)
+        self.val_volume_3d = char_domain.get_characteristic_geodomain()
 
         if positional_encoding:
             num_freq_space = np.array(freq_nums[:3])
@@ -99,13 +99,13 @@ class V_Net(nn.Module):
     def draw_velocity_volume(self, label="|v| magnitude"):
         """
         mask: (nx, ny, nz) using that in char_domain
-        pixdim: voxel spacing (3,) for physical quiver scaling
+        pixdim: voxel spacing (3,) for physical quiver(unit mm/min) scaling
         """
         mask_np = self.char_domain.mask
         data_shape = self.char_domain.domain_shape[:3]
         nx, ny, nz = data_shape[0], data_shape[1], data_shape[2]
         with torch.no_grad():
-            grid = self.grid_tensor.to(next(self.v_net_raw.parameters()).device)
+            grid = self.val_volume_3d.to(next(self.v_net_raw.parameters()).device)
             vx, vy, vz = self.forward(grid)
             vx = vx.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[0] * mask_np
             vy = vy.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[1] * mask_np

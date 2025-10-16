@@ -105,12 +105,18 @@ class DCPINN_Base(Net_RBAResample):
                                              self.validate_forward_step(vx, vy, vz, t_index=0, 
                                                                         t_jump=6), self.current_epoch, dataformats='WH')
             # 4. visualize k and p slices
-            k_vis = self.ad_dc_net.v_dc_net.k_net.draw_permeability_volume() # shaped (H,W,C)
+            k_vis = self.ad_dc_net.v_dc_net.k_net.draw_physical_slices() # shaped (H,W,C)
             self.logger.experiment.add_image('val_k_slices', k_vis, self.current_epoch, dataformats='HWC')
 
-            p_vis = self.ad_dc_net.v_dc_net.p_net.draw_pressure_slices()
+            p_vis = self.ad_dc_net.v_dc_net.p_net.draw_physical_slices()
             self.logger.experiment.add_image('val_p_slices', p_vis, self.current_epoch, dataformats='HWC')
 
+            # 5. log histogram of real k, real p and real mag of v (WARNING: all are in physical unit)
+            self.logger.experiment.add_histogram('val_v_hist', v_mag.flatten(), self.current_epoch)
+            flat_k = self.ad_dc_net.v_dc_net.k_net.get_physical_volume().flatten()
+            self.logger.experiment.add_histogram('val_k_hist', flat_k, self.current_epoch)
+            flat_p = self.ad_dc_net.v_dc_net.p_net.get_physical_volume().flatten()
+            self.logger.experiment.add_histogram('val_p_hist', flat_p, self.current_epoch)
 
         return val_loss
 
@@ -144,7 +150,7 @@ class DCPINN_InitK(DCPINN_Base):
         # DEBUG: visualize k field slice to see if it is learning
         # if batch_idx == 0:
         #     # FIX: Access k_net through the main ad_dc_net module.
-        #     k_vis = self.ad_dc_net.v_dc_net.k_net.draw_permeability_volume()
+        #     k_vis = self.ad_dc_net.v_dc_net.k_net.draw_physical_slices()
         #     self.logger.experiment.add_image('train_K_slices', k_vis, self.current_epoch, dataformats='HWC')
 
 # use velocity datamodule to init p net
@@ -181,9 +187,9 @@ class DCPINN_InitP(DCPINN_Base):
         super().training_step(None, X_train_indice, [pointwise_loss], None, batch_idx)
 
         # DEBUG: visualize p field slice to see if it is learning
-        if batch_idx == 0:
-            p_vis = self.ad_dc_net.v_dc_net.p_net.draw_pressure_slices()
-            self.logger.experiment.add_image('train_p_slices', p_vis, self.current_epoch, dataformats='HWC')
+        # if batch_idx == 0:
+        #     p_vis = self.ad_dc_net.v_dc_net.p_net.draw_pressure_slices()
+        #     self.logger.experiment.add_image('train_p_slices', p_vis, self.current_epoch, dataformats='HWC')
 
 class DCPINN_ADPDE_P(DCPINN_Base):
     """Optimize pressure network via advection-diffusion residual (+ optional divergence residual).

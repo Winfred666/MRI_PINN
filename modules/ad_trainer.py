@@ -1,4 +1,5 @@
 from modules.ad_net import AD_Net
+import numpy as np
 import torch
 import torch.nn as nn
 from modules.rba_resample_trainer import Net_RBAResample
@@ -54,8 +55,13 @@ class ADPINN_Base(Net_RBAResample):
             self.log('val_data_loss', val_loss)
             c_vis = self.c_net.draw_concentration_slices()
             self.logger.experiment.add_image('val_C_compare', c_vis, self.current_epoch, dataformats='WH')
-            rgb_img, _, _, _ = self.v_net.draw_velocity_volume()
+            rgb_img, vx, vy, vz = self.v_net.draw_velocity_volume()
             self.logger.experiment.add_image('val_v_quiver', rgb_img, self.current_epoch, dataformats='HWC')
+
+            # log velocity histogram
+            flat_v = np.sqrt(vx**2 + vy**2 + vz**2).flatten()
+            self.logger.experiment.add_histogram('val_v_hist', flat_v, self.current_epoch)
+            
         return val_loss
 
 

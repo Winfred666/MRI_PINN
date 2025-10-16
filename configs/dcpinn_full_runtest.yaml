@@ -46,10 +46,10 @@ enable_rbar: true
 # This can slow down training epochs but may lead to faster convergence.
 
 # --- Dataloader & Checkpointing Settings ---
-reload_dataloaders_every_n_epochs: 4
+reload_dataloaders_every_n_epochs: 100
 # How often to re-evaluate RBAR weights. Set to 0 if RBAR is disabled.
 
-ckpt_save_val_interval: 4
+ckpt_save_val_interval: 100
 # How often to run validation and save checkpoints (in epochs).
 
 dataset_num_workers: 8
@@ -85,16 +85,16 @@ phases:
     incompressible: true
     learning_rate: 0.001
     max_epochs: 5
-    batch_size: 2000
+    batch_size: 20000
 
   ad_pde_p_k:
     incompressible: true
     learning_rate: 0.001
     max_epochs: 5
-    batch_size: 2000
+    batch_size: 20000
 
   joint_data+joint_ad_pde:
     incompressible: true
     learning_rate: 0.001
     max_epochs: 10
-    batch_size: 2000
+    batch_size: 20000

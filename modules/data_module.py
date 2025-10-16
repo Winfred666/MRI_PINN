@@ -159,7 +159,7 @@ class MultiInputDataset(torch.utils.data.Dataset):
         return [X[idx] for X in self.X_list], self.train_indices[idx], self.C[idx]
 
 class RBAResampleDataModule(L.LightningDataModule):
-    def __init__(self, char_domain,  batch_size, num_workers=8, device="cpu"):
+    def __init__(self, char_domain,  batch_size, num_workers=0, device="cpu"):
         super().__init__()
         self.rba_model = None
         self.num_train_points = 0
@@ -196,7 +196,7 @@ class RBAResampleDataModule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True if self.rba_model is None else None,
             num_workers=self.num_workers,          # for safety of notebook and widget
-            persistent_workers=True,
+            persistent_workers=(self.num_workers > 0),
             sampler=sampler
         )
     def val_dataloader_simple(self, X_val, X_val_indice, C_val):
@@ -210,12 +210,12 @@ class RBAResampleDataModule(L.LightningDataModule):
         )
 
 class VelocityDataModule(RBAResampleDataModule):
-    # velocity is (x,y,z,3) numpy array, unit in grid/min
+    # velocity is (x,y,z,3) numpy array, unit in cell/min
     def __init__(self, velocity, char_domain, batch_size=1024, num_workers=8, device="cpu"):
         # setting spatial self.points list.
         super().__init__(char_domain, batch_size, num_workers, device)
         self.input_dim = 3  # (x,y,z)
-        # convert to normalized unit(so velocity should be in grid/mm)
+        # convert cell/min to mm/min, then to normalized unit(so velocity should be in grid/mm)
         self.velocity = velocity * (char_domain.pixdim / char_domain.V_star)
         self.num_train_points = self.num_points
 
