@@ -60,6 +60,9 @@ class ADPINN_Base(Net_RBAResample):
 
             # log velocity histogram
             flat_v = np.sqrt(vx**2 + vy**2 + vz**2).flatten()
+            if np.min(flat_v) <= 0:
+                flat_v = flat_v - np.min(flat_v) + 1e-3
+            flat_v = np.log(flat_v)
             self.logger.experiment.add_histogram('val_v_hist', flat_v, self.current_epoch)
             
         return val_loss
