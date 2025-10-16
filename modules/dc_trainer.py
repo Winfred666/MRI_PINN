@@ -112,10 +112,22 @@ class DCPINN_Base(Net_RBAResample):
             self.logger.experiment.add_image('val_p_slices', p_vis, self.current_epoch, dataformats='HWC')
 
             # 5. log histogram of real k, real p and real mag of v (WARNING: all are in physical unit)
+            if np.min(v_mag) <= 0:
+                v_mag = v_mag - np.min(v_mag) + 1e-3
+            v_mag = np.log(v_mag)
             self.logger.experiment.add_histogram('val_v_hist', v_mag.flatten(), self.current_epoch)
+            
             flat_k = self.ad_dc_net.v_dc_net.k_net.get_physical_volume().flatten()
+            if np.min(flat_k) <= 0:
+                flat_k = flat_k - np.min(flat_k) + 1e-3
+            flat_k = np.log(flat_k)
             self.logger.experiment.add_histogram('val_k_hist', flat_k, self.current_epoch)
+            
             flat_p = self.ad_dc_net.v_dc_net.p_net.get_physical_volume().flatten()
+            # take log scale for p histogram, since p can be negative, we add a constant shift
+            if np.min(flat_p) <= 0:
+                flat_p = flat_p - np.min(flat_p) + 1e-3
+            flat_p = np.log(flat_p)
             self.logger.experiment.add_histogram('val_p_hist', flat_p, self.current_epoch)
 
         return val_loss
