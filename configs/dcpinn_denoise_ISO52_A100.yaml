@@ -1,5 +1,5 @@
-# the default output folder name in <results> 
-# is the config file name without extension. 
+# the default output folder name in <results>
+# is the config file name without extension.
 
 # --- Training Control ---
 # If false, load a model from ckpt_path for inference without training.
@@ -36,7 +36,7 @@ use_learnable_D: false
 incompressible: true
 # If true, use the Diffusion Tensor Imaging data for anisotropic diffusion.
 # If false, a single learnable isotropic diffusion coefficient is used.
-viscosity: 6.95e-4 
+viscosity: 6.95e-4
 
 # --- RBAR (Residual-Based Attention Resampling) ---
 enable_rbar: true
@@ -78,18 +78,18 @@ phases:
 
   filter:
     batch_size: 200000
-  
+
   ad_pde_p:
     learning_rate: 0.0005
-    max_epochs: 6000
-    batch_size: 200000
+    max_epochs: 8000
+    batch_size: 340000
 
   ad_pde_p_k:
     learning_rate: 0.0005
-    max_epochs: 6000
-    batch_size: 200000
+    max_epochs: 8000
+    batch_size: 340000
 
   joint_data+joint_ad_pde:
-    learning_rate: 0.0005
-    max_epochs: 6000
-    batch_size: 200000
+    learning_rate: 0.0001
+    max_epochs: 8000
+    batch_size: 340000

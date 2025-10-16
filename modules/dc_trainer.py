@@ -54,7 +54,7 @@ class DCPINN_Base(Net_RBAResample):
             D = char_domain.DTI_or_coef * self.ad_dc_net.D
             # reshape (1, 9, Nx, Ny, Nz) back to (nx,ny,nz,3,3)
             D = D.permute(2, 3, 4, 0, 1).reshape(*D.shape[2:], 3, 3).detach().cpu().numpy()
-        num_steps = int(t_duration * 10)  # 0.1 min per step
+        num_steps = int(t_duration * 2)  # 0.5 min per step
         frames = advect_diffuse_forward_simulation(start_c, vx, vy, vz, D, t_duration,
                                                    num_steps=num_steps,
                                                    voxel_dims=char_domain.pixdim) # 4 min between frame.
