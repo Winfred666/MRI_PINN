@@ -66,3 +66,7 @@ class Train_Config:
             raise ValueError("'do_training' is false, but 'ckpt_path' for inference is not provided.")
         if self.use_DTI and not self.dti_data_path:
             raise ValueError("'use_DTI' is true, but 'dti_data_path' is not provided.")
+        
+        # Also save a copy of the config file to result folder
+        with open(os.path.join(self.result_folder, 'config.yaml'), 'w') as f:
+            yaml.dump(config, f)

@@ -268,36 +268,57 @@ class DCEMRIDataModule(RBAResampleDataModule):
 
     # for testing instead of infer, we use half of data for training
     def setup(self, stage=None):
-        # split x, y, z and t so that we can do seperate grad.
-        X_train_list, C_train_list = ([],[]), []
-        X_train_indice_list, X_val_indice_list = [], []
+        """
+        Optimized setup method using vectorized operations.
+        """
+        print("Running optimized DCEMRIDataModule setup...")
         
-        X_val_list, C_val_list = ([],[]) , []
-        # Deterministic even/odd split (consider random for production)
-        for i, ti in enumerate(self.char_domain.t_normalized):
-            Ci = self.data[:, :, :, i][self.char_domain.mask == 1]
-            ti_array = np.full((self.num_points, 1), ti, dtype=np.float32)
-            if i % 2 == 0:
-                X_train_list[0].append(self.points)  # x, y, z
-                X_train_list[1].append(ti_array)  # t
-                C_train_list.append(Ci.reshape(-1, 1))  # reshape to (num_points,1)
-                # warning: RBA is only for spatial points
-                X_train_indice_list.append(np.arange(self.num_points))
-            else:
-                X_val_list[0].append(self.points)  # x, y, z
-                X_val_list[1].append(ti_array)  # t
-                C_val_list.append(Ci.reshape(-1, 1))
+        # 1. Get all time steps and create train/val splits
+        all_times = self.char_domain.t_normalized
+        train_indices_t = np.arange(0, len(all_times), 2)
+        val_indices_t = np.arange(1, len(all_times), 2)
+        
+        train_times = all_times[train_indices_t]
+        val_times = all_times[val_indices_t]
 
-                X_val_indice_list.append(np.arange(self.num_points))
+        # 2. Get all spatial points within the mask
+        # self.points are the normalized spatial coordinates from the parent class
+        num_spatial_points = self.points.shape[0]
 
-        self.X_train = [torch.tensor(np.vstack(X_train_list[i]), dtype=torch.float32) for i in range(2)]
-        self.X_train_indice = torch.tensor(np.hstack(X_train_indice_list), dtype=torch.long) # (num_points,)
+        # 3. Create the training set
+        # Tile spatial coordinates for each training time step
+        X_train_spatial = np.tile(self.points, (len(train_times), 1))
+        # Repeat each time value for all spatial points
+        t_train_temporal = np.repeat(train_times, num_spatial_points).reshape(-1, 1)
+        # Combine into a single list of tensors
+        self.X_train = [
+            torch.tensor(X_train_spatial, dtype=torch.float32),
+            torch.tensor(t_train_temporal, dtype=torch.float32)
+        ]
+
+        # Get corresponding concentration values
+        self.C_train = torch.tensor(
+            self.data[:, :, :, train_indices_t][self.char_domain.mask == 1].T.flatten(),
+            dtype=torch.float32
+        ).reshape(-1, 1)
+        
+        # RBA indices are just for spatial points, so we tile them
+        self.X_train_indice = torch.tile(torch.arange(num_spatial_points, dtype=torch.long), (len(train_times),))
         self.num_train_points = self.X_train_indice.shape[0]
-        self.C_train = torch.tensor(np.vstack(C_train_list), dtype=torch.float32)
 
-        self.X_val = [torch.tensor(np.vstack(X_val_list[i]), dtype=torch.float32) for i in range(2)]
-        self.X_val_indice = torch.tensor(np.hstack(X_val_indice_list), dtype=torch.long)  # (num_points,)
-        self.C_val = torch.tensor(np.vstack(C_val_list), dtype=torch.float32)
+        # 4. Create the validation set (similar to training set but with different indices)
+        X_val_spatial = np.tile(self.points, (len(val_times), 1))
+        t_val_temporal = np.repeat(val_times, num_spatial_points).reshape(-1, 1)
+        self.X_val = [
+            torch.tensor(X_val_spatial, dtype=torch.float32),
+            torch.tensor(t_val_temporal, dtype=torch.float32)
+        ]
+        self.C_val = torch.tensor(
+            self.data[:, :, :, val_indices_t][self.char_domain.mask == 1].T.flatten(),
+            dtype=torch.float32
+        ).reshape(-1, 1)
+        
+        self.X_val_indice = torch.tile(torch.arange(num_spatial_points, dtype=torch.long), (len(val_times),))
 
     # WARNING: compared to validation dataloader, training provide point_indice, 
     # to allow RBA weight calculation for each point
