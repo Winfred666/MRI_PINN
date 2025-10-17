@@ -46,7 +46,7 @@ class Train_Config:
         self.enable_rbar = config.get('enable_rbar', False)
 
         # --- Dataloader & Checkpointing ---
-        self.reload_dataloaders_every_n_epochs = config.get('reload_dataloaders_every_n_epochs', 1)
+        self.reload_dataloaders_every_n_epochs = config.get('reload_dataloaders_every_n_epochs', 10)
 
         self.cuda_visible_devices = config.get('cuda_visible_devices', [0])
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join([str(i) for i in self.cuda_visible_devices])

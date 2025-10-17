@@ -15,7 +15,7 @@ def front_tracking_velocity(concentration_data, dt):
     sparse_velocities = []
 
     # STEP 1: Choose front values(already scale to )
-    front_values = [12, 20, 40] # Example concentration levels
+    front_values = [6, 12, 20] # Example concentration levels
 
     # Loop over time and fronts
     for t_idx in range(num_times - 1):
@@ -74,7 +74,7 @@ def front_tracking_velocity(concentration_data, dt):
                 # STEP 4: A more robust search for the corresponding point P2
                 # Define a maximum search distance, similar to dmax in the paper.
                 # This should be larger than the expected movement in one time step.
-                search_radius = 4.0 # In voxels, adjust as needed
+                search_radius = 5.0 # In voxels, adjust as needed
 
                 # Find all candidate points on front_2 within the search radius of p1
                 indices_in_radius = tree_front2.query_ball_point(p1, r=search_radius)
@@ -215,8 +215,12 @@ if __name__ == '__main__':
     u_sub = u[::subsample, ::subsample]
     v_sub = v[::subsample, ::subsample]
 
-    # Plot the quiver
-    ax.quiver(x_sub, y_sub, u_sub, v_sub, color='r', scale=25, headwidth=4)
+    # Calculate magnitude for coloring the arrows
+    magnitude = np.sqrt(u_sub**2 + v_sub**2)
+
+    # Plot the quiver, with color representing magnitude
+    q = ax.quiver(x_sub, y_sub, u_sub, v_sub, magnitude, cmap='jet', scale=25, headwidth=4)
+    fig.colorbar(q, ax=ax, fraction=0.046, pad=0.04, label='Velocity Magnitude (voxels/dt)')
     ax.set_title(f'Estimated Velocity Field (Z-slice={central_slice_idx})')
     ax.set_xlabel('X')
     ax.set_ylabel('Y')

@@ -6,9 +6,9 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: false
+continue_training: true
 
-ckpt_path: "tb_logs/seqtrain_ADPINN/dcpinn_full_251009_1607/checkpoints/last.ckpt"
+ckpt_path: "tb_logs/seqtrain_ADPINN/dcpinn_denoise_ISO52_H100_251017_0020/checkpoints/last.ckpt"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
 dcemrinp_data_path: "data/ISO052_DCE_nii_data/dataset_downsampled.npz"
@@ -47,10 +47,10 @@ enable_rbar: true
 reload_dataloaders_every_n_epochs: 100
 # How often to re-evaluate RBAR weights. Set to 0 if RBAR is disabled.
 
-ckpt_save_val_interval: 100
+ckpt_save_val_interval: 200
 # How often to run validation and save checkpoints (in epochs).
 
-dataset_num_workers: 16
+dataset_num_workers: 32
 # Number of worker processes for loading data.
 
 # --- Training Phases ---
@@ -63,7 +63,7 @@ phases:
 
   init_c_denoise_data:
     learning_rate: 0.002
-    max_epochs: 8000
+    max_epochs: 5000
     batch_size: 700000
 
   init_k_data:

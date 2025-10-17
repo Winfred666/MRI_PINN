@@ -5,7 +5,7 @@ import lightning as L
 
 class CharacteristicDomain():
     # domain_shape is (x,y,z,t) shape of data
-    def __init__(self, domain_shape, mask, t, pixdim, device="cpu"):
+    def __init__(self, domain_shape, mask, t, pixdim, presample_epoch=100, device="cpu"):
         self.pixdim = pixdim
         self._pixdim_tensor = torch.tensor(self.pixdim, dtype=torch.float32).to(device)
         self.domain_shape = domain_shape # (nx,ny,nz,nt)
@@ -28,7 +28,8 @@ class CharacteristicDomain():
         self.t_normalized = (t - self.T_offset) / self.T_star
         self.t = t # keep original time array for reference
         self.V_star = self.L_star / self.T_star  # characteristic velocity in grid/unit time
-
+        
+        self.presample_epoch = presample_epoch
 
     def set_DTI_or_coef(self, DTI_or_coef):
         # if we already using DTI, then we should set Pe = 3.0 (water/tracer's diffusivity)
@@ -158,8 +159,40 @@ class MultiInputDataset(torch.utils.data.Dataset):
             return self.X_list[idx], self.train_indices[idx], self.C[idx]
         return [X[idx] for X in self.X_list], self.train_indices[idx], self.C[idx]
 
+class MultiEpochWeightedRandomSampler(torch.utils.data.Sampler):
+    """
+    A WeightedRandomSampler that pre-generates indices for multiple epochs.
+    This avoids the costly torch.multinomial call at the start of every epoch.
+    """
+    def __init__(self, weights, num_samples, replacement=True, num_epochs=100):
+        self.weights = torch.as_tensor(weights, dtype=torch.double)
+        self.num_samples = num_samples
+        self.replacement = replacement
+        self.num_epochs = num_epochs
+        self.epoch = 0
+        self.indices = []
+        self._generate_indices()
+
+    # Generate a new set of indices for all epochs
+    def _generate_indices(self):
+        self.indices = torch.multinomial(self.weights, self.num_samples * self.num_epochs, self.replacement).view(self.num_epochs, self.num_samples)
+
+    def __iter__(self):
+        if self.epoch >= self.num_epochs:
+            # Regenerate indices if we have exhausted the pre-generated ones
+            self._generate_indices()
+            self.epoch = 0
+        
+        epoch_indices = self.indices[self.epoch].tolist()
+        self.epoch += 1
+        return iter(epoch_indices)
+
+    def __len__(self):
+        return self.num_samples
+
+
 class RBAResampleDataModule(L.LightningDataModule):
-    def __init__(self, char_domain,  batch_size, num_workers=0, device="cpu"):
+    def __init__(self, char_domain:CharacteristicDomain,  batch_size, num_workers=0, device="cpu"):
         super().__init__()
         self.rba_model = None
         self.num_train_points = 0
@@ -186,16 +219,25 @@ class RBAResampleDataModule(L.LightningDataModule):
             raise ValueError("num_train_points must be set before calling train_dataloader_with_weights.")
     
         ds = MultiInputDataset(X_train, X_train_indice, C_train)
-        sampler = None if self.rba_model is None else torch.utils.data.WeightedRandomSampler(
-            weights=self.rba_model.get_sample_prob_weight(),
-            num_samples=self.num_train_points, # still sample all points.
-            replacement=True
-        )
+        
+        if self.rba_model is None:
+            sampler = None
+            shuffle = True
+        else:
+            # Use the new, efficient sampler
+            sampler = MultiEpochWeightedRandomSampler(
+                weights=self.rba_model.get_sample_prob_weight(),
+                num_samples=self.num_train_points,
+                replacement=True,
+                num_epochs=self.char_domain.presample_epoch # Match this to your reload_dataloaders_every_n_epochs
+            )
+            shuffle = False # Sampler handles shuffling
+
         return torch.utils.data.DataLoader(
             ds,
             batch_size=self.batch_size,
-            shuffle=True if self.rba_model is None else None,
-            num_workers=self.num_workers,          # for safety of notebook and widget
+            shuffle=shuffle,
+            num_workers=self.num_workers,
             persistent_workers=(self.num_workers > 0),
             sampler=sampler
         )

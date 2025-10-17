@@ -3,13 +3,17 @@ from scipy.ndimage import map_coordinates
 
 def advection_step(C, vx, vy, vz, dt):
     """
-    Performs one step of advection using a first-order Semi-Lagrangian method.
-    This method is unconditionally stable.
-
+    Performs one step of advection using a high-order Semi-Lagrangian method.
+    This implementation uses RK4 for temporal integration and cubic interpolation
+    for spatial accuracy, which is unconditionally stable and minimizes numerical diffusion.
     Args:
         C (np.ndarray): 3D concentration field at time t, shape (nx, ny, nz).
         vx, vy, vz (np.ndarray): 3D velocity component fields (assumed constant for dt).
-        dt (float): Time step duration.
+                                 The velocity is in voxel units per dt.
+        dt (float): Time step duration. For the semi-lagrangian scheme, this is
+                    used to scale the velocity field for the path tracing.
+                    The velocity vx, vy, vz should be in units of [voxels/dt].
+                    The RK4 integration happens over a normalized time [0, -1] * dt.
 
     Returns:
         np.ndarray: Advected 3D concentration field at time t + dt.
@@ -17,27 +21,60 @@ def advection_step(C, vx, vy, vz, dt):
     nx, ny, nz = C.shape
     
     # 1. Create a grid of destination coordinates (where we want to know the new C)
-    x_coords, y_coords, z_coords = np.indices((nx, ny, nz))
+    x_coords, y_coords, z_coords = np.indices((nx, ny, nz), dtype=np.float32)
 
-    # 2. Calculate the departure points (where the fluid came from)
-    # This is the "back-tracing" step. We are looking backward in time.
-    # Note: Velocity is assumed to be in voxel units per dt.
+    # --- RK4 Back-tracing to find departure points ---
+    # We want to solve dX/dt = v(X) backward in time.
+    h = dt
+
+    # Initial positions are the grid points
+    p = np.stack([x_coords, y_coords, z_coords], axis=-1)
+
+    # k1: Evaluate velocity at the starting point (grid points)
+    # We need to interpolate the velocity field (vx, vy, vz) at arbitrary positions 'p'.
+    k1_vx = map_coordinates(vx, p.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k1_vy = map_coordinates(vy, p.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k1_vz = map_coordinates(vz, p.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k1 = np.stack([k1_vx, k1_vy, k1_vz], axis=-1)
+
+    # k2: Evaluate velocity at the midpoint using k1
+    p_k2 = p - 0.5 * h * k1
+    k2_vx = map_coordinates(vx, p_k2.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k2_vy = map_coordinates(vy, p_k2.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k2_vz = map_coordinates(vz, p_k2.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k2 = np.stack([k2_vx, k2_vy, k2_vz], axis=-1)
+
+    # k3: Evaluate velocity at the midpoint using k2
+    p_k3 = p - 0.5 * h * k2
+    k3_vx = map_coordinates(vx, p_k3.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k3_vy = map_coordinates(vy, p_k3.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k3_vz = map_coordinates(vz, p_k3.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k3 = np.stack([k3_vx, k3_vy, k3_vz], axis=-1)
+
+    # k4: Evaluate velocity at the endpoint using k3
+    p_k4 = p - h * k3
+    k4_vx = map_coordinates(vx, p_k4.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k4_vy = map_coordinates(vy, p_k4.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k4_vz = map_coordinates(vz, p_k4.transpose(3, 0, 1, 2), order=1, mode='nearest')
+    k4 = np.stack([k4_vx, k4_vy, k4_vz], axis=-1)
+    # Combine to get the final departure point
+    departure_points = p - (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
     
-    departure_x = x_coords - vx * dt
-    departure_y = y_coords - vy * dt
-    departure_z = z_coords - vz * dt
+    # --- FIX: Store min/max before interpolation to prevent overshooting ---
+    min_C, max_C = C.min(), C.max()
 
-    # 3. Interpolate the original concentration C at the departure points
-    # The map_coordinates function is perfect for this. It handles all the
-    # sub-pixel interpolation for us.
-    # 'order=1' means linear interpolation, which is fast and usually sufficient.
+    # 3. Interpolate the original concentration C at the more accurately traced departure points
+    # 'order=3' means cubic spline interpolation, which is much more accurate than linear.
     # 'mode='nearest'' handles what to do for particles that trace back from outside the domain.
     C_advected = map_coordinates(
         input=C,
-        coordinates=[departure_x, departure_y, departure_z],
-        order=1,
+        coordinates=departure_points.transpose(3, 0, 1, 2),
+        order=3, # Cubic interpolation for higher accuracy
         mode='nearest' 
     )
+
+    # --- FIX: Clip the result to prevent non-physical over/undershooting ---
+    np.clip(C_advected, min_C, max_C, out=C_advected)
 
     return C_advected
 
@@ -161,7 +198,7 @@ def advect_diffuse_forward_simulation(
 # --- EXAMPLE USAGE ---
 if __name__ == "__main__":
     # Setup your parameters
-    D_coeff = 2.4e-7  # mm^2/s (from the paper)
+    D_coeff = 0.0  # mm^2/s (from the paper)
     voxel_size_mm = 0.1 # mm
     dt_mri = 60 # seconds between MRI frames
     # Assume you have these from your PINN and data:
@@ -198,6 +235,8 @@ if __name__ == "__main__":
             r = np.hypot(dx_mm, dy_mm)
 
             if r > 1e-12:
+                # ux = -v0 * 10 * voxel_size_mm
+                # vy =  v0 * 10 * voxel_size_mm
                 ux = -v0 * (r**2) * (dy_mm / r)  # -sin(theta), bigger r -> faster
                 vy =  v0 * (r**2) * (dx_mm / r)  #  cos(theta)
             else:
@@ -219,7 +258,7 @@ if __name__ == "__main__":
         vz=velocity_field_w,
         D=D_coeff,
         total_time=dt_mri,
-        num_steps=50, # More sub-steps lead to higher accuracy
+        num_steps=500, # More sub-steps lead to higher accuracy
         voxel_dims=(voxel_size_mm, voxel_size_mm, voxel_size_mm)
     )
 

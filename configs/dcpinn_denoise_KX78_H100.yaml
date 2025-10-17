@@ -30,7 +30,7 @@ cuda_visible_devices: [0]
 
 # --- Physics & PDE Configuration ---
 use_DTI: true
-dti_data_path: "data/KX078_DCE_nii_data/dti_tensor_3_3.mat"
+dti_data_path: "tb_logs/seqtrain_ADPINN/dcpinn_denoise_KX78_H100_251017_0020/checkpoints/last.ckpt"
 
 use_learnable_D: false
 
@@ -49,10 +49,10 @@ enable_rbar: true
 reload_dataloaders_every_n_epochs: 100
 # How often to re-evaluate RBAR weights. Set to 0 if RBAR is disabled.
 
-ckpt_save_val_interval: 100
+ckpt_save_val_interval: 200
 # How often to run validation and save checkpoints (in epochs).
 
-dataset_num_workers: 16
+dataset_num_workers: 32
 # Number of worker processes for loading data.
 
 # --- Training Phases ---

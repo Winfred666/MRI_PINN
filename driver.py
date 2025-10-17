@@ -47,7 +47,7 @@ def main(config_path):
     print(f"Pe_g: {char_domain.Pe_g}")
 
     # --- 3. Initial Guesses (Common & Specific) ---
-    initial_velocity_field = front_tracking_velocity(data[:, :, :, ::2], dt=t[2] - t[0])
+    initial_velocity_field = front_tracking_velocity(data[:, :, :, ::1], dt=t[1] - t[0])
     vel_mag = np.linalg.norm(initial_velocity_field, axis=-1)
     print(f"Initial velocity max and min: {vel_mag.max()}, {vel_mag.min()}")
 

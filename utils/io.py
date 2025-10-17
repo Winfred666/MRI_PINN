@@ -26,7 +26,7 @@ def save_velocity_mat(vx,vy,vz, pixdim, D, use_DTI ,path="data/ad_net_velocity.m
     v_tensor = v_tensor.reshape(-1, 1)  # shape (N*3, 1)
     # repeated 4 times, as in rOMT there are 4 interpolate steps
     v_tensor = np.tile(v_tensor, (4, 1))
-    print(v_tensor.shape)
+    print(v_tensor.shape, ' velocity save to: ', path)
     sio.savemat(path, {"u": v_tensor,
                       "D": D,
                       "use_DTI":use_DTI})
