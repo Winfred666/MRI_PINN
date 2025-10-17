@@ -30,7 +30,7 @@ cuda_visible_devices: [0]
 
 # --- Physics & PDE Configuration ---
 use_DTI: true
-dti_data_path: "tb_logs/seqtrain_ADPINN/dcpinn_denoise_KX78_H100_251017_0020/checkpoints/last.ckpt"
+dti_data_path: "data/KX078_DCE_nii_data/dti_tensor_3_3.mat"
 
 use_learnable_D: false
 
@@ -65,7 +65,7 @@ phases:
 
   init_c_denoise_data:
     learning_rate: 0.002
-    max_epochs: 8000
+    max_epochs: 5000
     batch_size: 700000
 
   init_k_data:

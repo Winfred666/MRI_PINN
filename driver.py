@@ -30,7 +30,7 @@ def main(config_path):
 
     # --- 2. Data Preparation (Common) ---
     data, mask, pixdim, x, y, z, t = load_dcemri_data(cfg.dcemrinp_data_path)
-    char_domain = CharacteristicDomain(data.shape, mask, t, pixdim, device)
+    char_domain = CharacteristicDomain(data.shape, mask, t, pixdim, cfg.reload_dataloaders_every_n_epochs, device)
     print(f"L_star: {char_domain.L_star}, T_star: {char_domain.T_star}")
 
     c_dataset = DCEMRIDataModule(data, char_domain,

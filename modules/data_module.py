@@ -175,7 +175,8 @@ class MultiEpochWeightedRandomSampler(torch.utils.data.Sampler):
 
     # Generate a new set of indices for all epochs
     def _generate_indices(self):
-        self.indices = torch.multinomial(self.weights, self.num_samples * self.num_epochs, self.replacement).view(self.num_epochs, self.num_samples)
+        self.indices = torch.multinomial(self.weights, 
+                        self.num_samples * self.num_epochs, self.replacement).view(self.num_epochs, self.num_samples)
 
     def __iter__(self):
         if self.epoch >= self.num_epochs:
