@@ -1,6 +1,7 @@
 import yaml
 from datetime import datetime
 import os
+import torch
 
 class Train_Config:
     def __init__(self, yaml_path):
@@ -56,6 +57,9 @@ class Train_Config:
 
         # --- Training Phases ---
         self.phases = config.get('phases', {})
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
 
         # --- Sanity Checks ---
         if self.continue_training and not self.do_training:

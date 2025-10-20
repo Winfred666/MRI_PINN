@@ -40,7 +40,7 @@ def main(config_path):
     print(f"num_train_points: {c_dataset.num_train_points}, batch_size: {c_dataset.batch_size}")
 
     if cfg.use_DTI:
-        DTI_tensor, _ = load_DTI(char_domain, cfg.dti_data_path, data.shape[:3])
+        DTI_tensor, _ , _ = load_DTI(char_domain, cfg.dti_data_path, data.shape[:3])
     else:
         DTI_tensor = None
     char_domain.set_DTI_or_coef(DTI_tensor if cfg.use_DTI else 2.4e-4)

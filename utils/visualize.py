@@ -114,7 +114,8 @@ def interactive_quiver(vx, vy, vz, pixdim, default_elev=None, default_azim=None)
             normalize_vectors=normalize_vectors,
             ax=ax,
             show=False,
-            return_mappable=True
+            return_mappable=True,
+            cmap='jet'
         )
         _, _, mappable = fig_ret
         stored_mappable = mappable

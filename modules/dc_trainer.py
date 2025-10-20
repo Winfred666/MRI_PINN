@@ -62,8 +62,12 @@ class DCPINN_Base(Net_RBAResample):
         
         # now return a stack of volume slice, start, end and error, ready for tensorboard
         slices = [frames[0][:,:,z_slice], frames[num_steps//2][:,:,z_slice], 
-                  frames[-1][:,:,z_slice], end_c[:,:,z_slice], (frames[-1]-end_c)[:,:,z_slice]]
-        return np.vstack(slices)  # shape (4, nx, ny)
+                  frames[-1][:,:,z_slice], end_c[:,:,z_slice], np.abs((frames[-1]-end_c)[:,:,z_slice])]
+        slices = np.vstack(slices)
+        # clip the negative value, normalize to [0,1] for better visualization
+        slices = np.clip(slices, 0, None)
+        slices = slices / (np.max(slices) + 1e-8)
+        return slices  # shape (4, nx, ny)
 
     def validation_step(self, batch, batch_idx):
         # always use DCE-MRI batch for validation
@@ -90,8 +94,8 @@ class DCPINN_Base(Net_RBAResample):
             
             # 2. Also calculate the norm of velocity field, slice at bottom of x domain to see willis ring
             v_mag = np.sqrt(vx**2 + vy**2 + vz**2).reshape(self.ad_dc_net.char_domain.domain_shape[:3])
-            slices_to_log = [10, 15]
-            # slices_to_log = [41, 43, 45]
+            # slices_to_log = [10, 15]
+            slices_to_log = [41, 43, 45]
             slice_images = []
             for z_slice_idx in slices_to_log:
                 v_slice = v_mag[z_slice_idx, :, :].T
@@ -103,7 +107,7 @@ class DCPINN_Base(Net_RBAResample):
             # 3. visualize one adv-diff step
             self.logger.experiment.add_image('val_adv_diff_step', 
                                              self.validate_forward_step(vx, vy, vz, t_index=0, 
-                                                                        t_jump=4), self.current_epoch, dataformats='WH')
+                                                                        t_jump=8), self.current_epoch, dataformats='WH')
             # 4. visualize k and p slices
             k_vis = self.ad_dc_net.v_dc_net.k_net.draw_physical_slices() # shaped (H,W,C)
             self.logger.experiment.add_image('val_k_slices', k_vis, self.current_epoch, dataformats='HWC')
@@ -111,23 +115,20 @@ class DCPINN_Base(Net_RBAResample):
             p_vis = self.ad_dc_net.v_dc_net.p_net.draw_physical_slices()
             self.logger.experiment.add_image('val_p_slices', p_vis, self.current_epoch, dataformats='HWC')
 
-            # 5. log histogram of real k, real p and real mag of v (WARNING: all are in physical unit)
-            if np.min(v_mag) <= 0:
-                v_mag = v_mag - np.min(v_mag) + 1e-3
-            v_mag = np.log(v_mag)
-            self.logger.experiment.add_histogram('val_v_hist', v_mag.flatten(), self.current_epoch)
+            # 5. log histogram of real mag of v , real k and real p(WARNING: all are in physical unit, filter out large amount of <=0 points for log scale)
+            
+            flag_v_mag = v_mag.flatten()
+            flag_v_mag = np.log(flag_v_mag[flag_v_mag > 1e-8])  # filter out very small values as paper visualized.
+            self.logger.experiment.add_histogram('val_v_hist', flag_v_mag, self.current_epoch)
             
             flat_k = self.ad_dc_net.v_dc_net.k_net.get_physical_volume().flatten()
+            flat_k = np.log(flat_k[flat_k > 1e-10])  # filter out very small values as paper visualized.
             if np.min(flat_k) <= 0:
                 flat_k = flat_k - np.min(flat_k) + 1e-3
-            flat_k = np.log(flat_k)
             self.logger.experiment.add_histogram('val_k_hist', flat_k, self.current_epoch)
             
-            flat_p = self.ad_dc_net.v_dc_net.p_net.get_physical_volume().flatten()
-            # take log scale for p histogram, since p can be negative, we add a constant shift
-            if np.min(flat_p) <= 0:
-                flat_p = flat_p - np.min(flat_p) + 1e-3
-            flat_p = np.log(flat_p)
+            # do not take log for pressure, only offset to calibrate the value.
+            flat_p = self.ad_dc_net.v_dc_net.p_net.get_physical_volume(min_base=0).flatten()
             self.logger.experiment.add_histogram('val_p_hist', flat_p, self.current_epoch)
 
         return val_loss
@@ -214,7 +215,7 @@ class DCPINN_ADPDE_P(DCPINN_Base):
                  ad_dc_net: AD_DC_Net,
                  num_train_points,
                  incompressible=False,
-                 div_weight=0.001,
+                 div_weight=1e-6,
                  learning_rate=1e-3,
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
@@ -261,7 +262,7 @@ class DCPINN_ADPDE_P_K(DCPINN_ADPDE_P):
                  ad_dc_net: AD_DC_Net,
                  num_train_points,
                  incompressible=False,
-                 div_weight=0.005,
+                 div_weight=1e-5,
                  learning_rate=1e-3,
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
@@ -296,9 +297,9 @@ class DCPINN_Joint(DCPINN_Base):
                  ad_dc_net: AD_DC_Net,
                  num_train_points,
                  incompressible=False,
-                 data_weight=1.0,
+                 data_weight=10.0,
                  pde_weight=10.0,
-                 div_weight=0.01,
+                 div_weight=1e-5,
                  learning_rate=1e-3,
                  rba_learning_rate=0.1,
                  rba_memory=0.999,

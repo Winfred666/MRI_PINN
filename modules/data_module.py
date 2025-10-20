@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import lightning as L
 
-
+# a class storing characteristic scales and other common data like mask, DTI and epoch between resample (RBAR).
 class CharacteristicDomain():
     # domain_shape is (x,y,z,t) shape of data
     def __init__(self, domain_shape, mask, t, pixdim, presample_epoch=100, device="cpu"):
@@ -33,7 +33,7 @@ class CharacteristicDomain():
 
     def set_DTI_or_coef(self, DTI_or_coef):
         # if we already using DTI, then we should set Pe = 3.0 (water/tracer's diffusivity)
-        self.Pe_g = self.V_star.mean() * self.L_star.mean() / (DTI_or_coef if isinstance(DTI_or_coef, float) else 3.0)  # global Peclet number
+        self.Pe_g = (self.V_star.mean() * self.L_star.mean() * DTI_or_coef) if isinstance(DTI_or_coef, float) else 3.0  # global Peclet number
         # for better leverage 
         self.DTI_or_coef = torch.tensor(DTI_or_coef, dtype=torch.float32).to(self.device) # either a float (isotropic coeff) tensor or a (nx,ny,nz,3,3) tensor
         if not isinstance(DTI_or_coef, float):
@@ -144,6 +144,9 @@ class CharacteristicDomain():
             vol[ix, iy, iz, it] = v
         return vol
 
+
+
+
 class MultiInputDataset(torch.utils.data.Dataset):
     def __init__(self, X_list, train_indices, C):
         self.X_list = X_list
@@ -190,6 +193,8 @@ class MultiEpochWeightedRandomSampler(torch.utils.data.Sampler):
 
     def __len__(self):
         return self.num_samples
+
+
 
 
 class RBAResampleDataModule(L.LightningDataModule):
@@ -252,6 +257,10 @@ class RBAResampleDataModule(L.LightningDataModule):
             persistent_workers=False
         )
 
+
+
+
+
 class VelocityDataModule(RBAResampleDataModule):
     # velocity is (x,y,z,3) numpy array, unit in cell/min
     def __init__(self, velocity, char_domain, batch_size=1024, num_workers=8, device="cpu"):
@@ -297,6 +306,10 @@ class PermeabilityDataModule(RBAResampleDataModule):
     
     def train_dataloader(self):
         return self.train_dataloader_with_weights(self.X_train, self.X_train_indice, self.k_train)
+
+
+
+
 
 # receive lightning module and sample with weight instead of uniform
 class DCEMRIDataModule(RBAResampleDataModule):

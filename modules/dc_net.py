@@ -55,15 +55,21 @@ class P_Net(nn.Module):
             X = self.p_pos_encoder(X)
         return self.mlp(X)
     
-    def get_physical_volume(self):
+    # absolute value of p could value, use min baseline or point_baseline to calibrate the output
+    # min_base is only a value, point_base is [x,y,z, p_value] (4,) array.
+    def get_physical_volume(self ,min_base=None, point_base=None):
         with torch.no_grad():
             device = next(self.parameters()).device
             val_coords = self.val_volume_3d.to(device) # shape (nx*ny*nz, 3)
             P_vals = self.forward(val_coords).cpu().numpy().reshape(*self.char_domain.domain_shape[:3])
             P_vals = P_vals * self.P_star.cpu().numpy()  # physical unit
+            if min_base is not None:
+                P_vals = P_vals - np.min(P_vals) + min_base
+            if point_base is not None:
+                P_vals = P_vals - P_vals[point_base[:3]] + point_base[3]
             return P_vals # shaped (nx, ny, nz)
 
-    def draw_physical_slices(self, cmap="inferno"):
+    def draw_physical_slices(self, cmap="inferno", min_base=None, point_base=None):
         """
         Evaluate pressure over precomputed val_slice_3d (call prepare_pressure_slice first).
         Returns:
@@ -79,6 +85,10 @@ class P_Net(nn.Module):
             for i in range(len(self.val_slice_z)):
                 mask_disp = self.char_domain.mask[:, :, self.val_slice_z[i]]
                 vol_disp = vol_disp_all[:, :, i] * mask_disp  # apply mask
+                if min_base is not None:
+                    vol_disp = vol_disp - np.min(vol_disp) + min_base
+                if point_base is not None:
+                    vol_disp = vol_disp - vol_disp[point_base[:3]] + point_base[3]
                 # for each slice, apply cmap using matplotlib and save as RGB
                 image = draw_colorful_slice_image(vol_disp, cmap=cmap, mask=mask_disp) # shaped (nx, ny, 3)
                 p_vis_list.append(image)
@@ -100,9 +110,18 @@ class K_Net(P_Net):
                                 positional_encoding=positional_encoding,
                                 freq_nums=freq_nums,
                                 gamma_space=gamma_space)
+    
+    def forward(self, X):
+        # Get the raw output from the inherited P_Net forward method
+        raw_output = super().forward(X)
+        # Apply exponential function to ensure positivity
+        return torch.exp(raw_output)
+    
     # just using different cmap
     def draw_physical_slices(self, cmap="cool"):
         return super().draw_physical_slices(cmap)
+    
+    
 
 
 class V_DC_Net(nn.Module):
@@ -260,6 +279,7 @@ class AD_DC_Net(nn.Module):
         """
         X, t = Xt
         vx, vy, vz = self.v_dc_net(X)  # (N,3)
+        # D_normalized is always accessible, for both anisotropic and isotropic cases.
         c_X, c_t, c_diffusion = self.c_net.get_c_grad_ani_diffusion((X, t), self.D_normalized)
         c_x, c_y, c_z = c_X[:, 0:1], c_X[:, 1:2], c_X[:, 2:3]
         advection = vx * c_x + vy * c_y + vz * c_z
