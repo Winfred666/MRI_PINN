@@ -80,7 +80,7 @@ class C_Net(nn.Module):
         self.val_slice_4d = char_domain.get_characteristic_geotimedomain(slice_zindex=self.val_slice_z,
                                                                        slice_tindex=self.val_slice_t) # (6 slice * N,4)
         Z, T = np.meshgrid(self.val_slice_z, self.val_slice_t, indexing='ij')
-        self.gt_data = data # original data, only for revalidation.
+        self.gt_data = data / C_star # data in [0,100] in characteristic domain, only for revalidation.
         self.val_slice_gt_c = self.gt_data[:, :, Z, T]
 
     def forward(self, X_train):
