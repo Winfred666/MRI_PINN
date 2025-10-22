@@ -8,6 +8,8 @@ class Train_Config:
         with open(yaml_path, 'r') as f:
             config = yaml.safe_load(f)
 
+        self.model_type = 'ad' if 'adpinn' in os.path.basename(yaml_path).lower() else 'dc'
+
         # output_tag should be set as name + date of yaml file
         self.result_folder = "results/" + yaml_path.split('/')[-1].replace('.yaml', '') + \
         f"_{datetime.now().strftime('%y%m%d_%H%M')}"

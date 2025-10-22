@@ -25,8 +25,7 @@ def main(config_path):
     print(f"Running with config: {config_path}")
 
     # Determine model type from config file name
-    model_type = 'ad' if 'adpinn' in os.path.basename(config_path).lower() else 'dc'
-    print(f"Detected Model Type: {model_type.upper()}")
+    print(f"Detected Model Type: {cfg.model_type.upper()}")
 
     # --- 2. Data Preparation (Common) ---
     data, mask, pixdim, x, y, z, t = load_dcemri_data(cfg.dcemrinp_data_path)
@@ -57,7 +56,7 @@ def main(config_path):
     v_dataset.setup()
 
     # --- 4. Model-Specific Preparations ---
-    if model_type == 'dc':
+    if cfg.model_type == 'dc':
         from modules.dc_net import AD_DC_Net
         from modules.dc_trainer import DCPINN_InitK, DCPINN_InitP, DCPINN_ADPDE_P, DCPINN_ADPDE_P_K, DCPINN_Joint
         from modules.c_trainer import CNet_Init, CNet_DenoiseInit
@@ -76,6 +75,7 @@ def main(config_path):
         def trainer_getter(train_phase, ad_dc_net, phase_cfg={}):
             nonlocal c_dataset # Allow modification of the outer scope c_dataset
             incompressible = phase_cfg.get("incompressible", False)
+            enable_td_weight = phase_cfg.get("enable_td_weight", True)
             if train_phase == CNet_Init.train_phase: return CNet_Init(ad_dc_net.c_net, c_dataset.num_train_points), c_dataset
             if train_phase == CNet_DenoiseInit.train_phase: return CNet_DenoiseInit(ad_dc_net.c_net, c_dataset.num_train_points), c_dataset
             if train_phase == DCPINN_InitK.train_phase: return DCPINN_InitK(ad_dc_net, k_dataset.num_train_points), k_dataset
@@ -86,9 +86,9 @@ def main(config_path):
                 c_dataset = FilteredDCEMRIDataModule(c_dataset, valid_mask)
                 c_dataset.setup()
                 return None, c_dataset
-            if train_phase == DCPINN_ADPDE_P.train_phase: return DCPINN_ADPDE_P(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible), c_dataset
-            if train_phase == DCPINN_ADPDE_P_K.train_phase: return DCPINN_ADPDE_P_K(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible), c_dataset
-            if train_phase == DCPINN_Joint.train_phase: return DCPINN_Joint(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible), c_dataset
+            if train_phase == DCPINN_ADPDE_P.train_phase: return DCPINN_ADPDE_P(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight), c_dataset
+            if train_phase == DCPINN_ADPDE_P_K.train_phase: return DCPINN_ADPDE_P_K(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight), c_dataset
+            if train_phase == DCPINN_Joint.train_phase: return DCPINN_Joint(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight), c_dataset
             raise ValueError(f"Unknown train_phase {train_phase}")
 
         net = AD_DC_Net(c_layers=[4] + [cfg.c_neuron_num] * cfg.hid_layer_num + [1],
@@ -101,7 +101,7 @@ def main(config_path):
                         gamma_space=cfg.position_encode_freq_scale,
                         use_learnable_D=cfg.use_learnable_D)
 
-    elif model_type == 'ad':
+    elif cfg.model_type == 'ad':
         from modules.ad_net import AD_Net
         from modules.ad_trainer import ADPINN_InitV, ADPINN_PDE_V, ADPINN_Joint
         from modules.c_trainer import CNet_Init, CNet_DenoiseInit
@@ -140,7 +140,7 @@ def main(config_path):
             pinn_model = trainer_getter(checkpoint.get("train_phase"), net)[0]
             pinn_model.load_state_dict(checkpoint['state_dict'], strict=True)
         else: # Fallback for older checkpoints
-            pinn_model = trainer_getter("joint_data+joint_ad_pde" if model_type == 'dc' else "ad_joint", net)[0]
+            pinn_model = trainer_getter("joint_data+joint_ad_pde" if cfg.model_type == 'dc' else "ad_joint", net)[0]
             net.load_state_dict(checkpoint['state_dict'], strict=False)
 
     # --- 6. Post-Processing and Saving Results ---
@@ -148,7 +148,7 @@ def main(config_path):
     pinn_model.to(device)
     
     # Extract learned parameters
-    if model_type == 'dc':
+    if cfg.model_type == 'dc':
         D_learned = pinn_model.ad_dc_net.D.item()
         _, vx, vy, vz = pinn_model.ad_dc_net.v_dc_net.draw_velocity_volume()
     else: # 'ad'
@@ -165,7 +165,7 @@ def main(config_path):
 
     # Save velocity field for external analysis (e.g., MATLAB)
     save_path = f"{cfg.result_folder}/predict_velocity.mat"
-    if model_type == 'dc':
+    if cfg.model_type == 'dc':
         D_to_save = pinn_model.ad_dc_net.D.item() if not cfg.use_DTI else pinn_model.ad_dc_net.D_normalized.item()
     else: # 'ad'
         D_to_save = pinn_model.ad_net.D.item() if not cfg.use_DTI else pinn_model.ad_net.D_normalized.item()

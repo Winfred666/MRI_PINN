@@ -86,8 +86,8 @@ class C_Net(nn.Module):
     def forward(self, X_train):
         # Explicitly define the forward pass logic
         if self.c_pos_encoder:
-            x = self.c_pos_encoder(X_train)
-        return self.c_mlp(x)
+            X_train = self.c_pos_encoder(X_train)
+        return self.c_mlp(X_train)
 
     def draw_concentration_slices(self, ):
         with torch.no_grad():

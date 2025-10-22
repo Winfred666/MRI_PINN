@@ -220,6 +220,7 @@ class DCPINN_ADPDE_P(DCPINN_Base):
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
                  enable_rbar=True,
+                 enable_td_weight=True,
                  advpde_loss_name="ad_pde_p"):
         rba_list = [(advpde_loss_name, 1.0)]
         self.incompressible = incompressible
@@ -242,6 +243,8 @@ class DCPINN_ADPDE_P(DCPINN_Base):
             p.requires_grad = True
         self.ad_dc_net.c_net.eval()
 
+        self.enable_td_weight = enable_td_weight
+
     def training_step(self, batch, batch_idx):
         Xt, X_train_indice, _ = batch
         pde_residual = self.ad_dc_net.pde_residual(Xt)  # (N,1)
@@ -253,7 +256,9 @@ class DCPINN_ADPDE_P(DCPINN_Base):
             div_pointwise = div_v ** 2
             loss_list.append(div_pointwise)
         
-        super().training_step(self.ad_dc_net.c_net, X_train_indice, loss_list, Xt, batch_idx)
+        # WARNING: use time independent scaling according to config
+        super().training_step(self.ad_dc_net.c_net if self.enable_td_weight else None, 
+                              X_train_indice, loss_list, Xt if self.enable_td_weight else None, batch_idx)
 
 class DCPINN_ADPDE_P_K(DCPINN_ADPDE_P):
     # unfreeze k_net to jointly optimize p and k
@@ -266,7 +271,8 @@ class DCPINN_ADPDE_P_K(DCPINN_ADPDE_P):
                  learning_rate=1e-3,
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
-                 enable_rbar=True):
+                 enable_rbar=True,
+                 enable_td_weight=True):
         super().__init__(ad_dc_net,
                          num_train_points,
                          incompressible=incompressible,
@@ -275,6 +281,7 @@ class DCPINN_ADPDE_P_K(DCPINN_ADPDE_P):
                          rba_learning_rate=rba_learning_rate,
                          rba_memory=rba_memory,
                          enable_rbar=enable_rbar,
+                         enable_td_weight=enable_td_weight,
                          advpde_loss_name=DCPINN_ADPDE_P_K.train_phase)
         # Freeze c_net, Unfreeze k_net and p_net
         for c in self.ad_dc_net.c_net.parameters():
@@ -303,7 +310,8 @@ class DCPINN_Joint(DCPINN_Base):
                  learning_rate=1e-3,
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
-                 enable_rbar=True):
+                 enable_rbar=True,
+                 enable_td_weight=True):
         rba_list = [("joint_data", data_weight), ("joint_ad_pde", pde_weight)]
         self.incompressible = incompressible
         if incompressible:
@@ -323,6 +331,7 @@ class DCPINN_Joint(DCPINN_Base):
         for p in self.ad_dc_net.v_dc_net.p_net.parameters():
             p.requires_grad = True
         self.ad_dc_net.c_net.train()
+        self.enable_td_weight = enable_td_weight
 
     def training_step(self, batch, batch_idx):
         Xt, X_train_indice, c_observed = batch
@@ -341,4 +350,5 @@ class DCPINN_Joint(DCPINN_Base):
             div_pointwise = div_v ** 2
             loss_list.append(div_pointwise)
 
-        super().training_step(self.ad_dc_net.c_net, X_train_indice, loss_list, Xt, batch_idx)
+        super().training_step(self.ad_dc_net.c_net if self.enable_td_weight else None
+                              , X_train_indice, loss_list, Xt if self.enable_td_weight else None, batch_idx)

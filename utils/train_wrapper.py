@@ -5,7 +5,7 @@ import torch
 from utils.config_loader import Train_Config
 
 def train_all_phases(main_net, trainer_getter, train_config: Train_Config):
-    logger = TensorBoardLogger("tb_logs", name="seqtrain_ADPINN",
+    logger = TensorBoardLogger("tb_logs", name=f"seqtrain_{train_config.model_type.upper()}",
                                version=train_config.result_folder.split('/')[-1])
     # save every N epochs
     checkpoint_callback_best = ModelCheckpoint(
@@ -84,7 +84,7 @@ def train_all_phases(main_net, trainer_getter, train_config: Train_Config):
         if continue_training_from_ckpt_strict:
             continue_training_from_ckpt_strict = False # already used.
 
-        ckpt_name = f"{train_config.result_folder}/adpinn_{phase}.pth"
+        ckpt_name = f"{train_config.result_folder}/{train_config.model_type}pinn_{phase}.pth"
         trainer.save_checkpoint(ckpt_name)
         
         last_model = pinn_model
