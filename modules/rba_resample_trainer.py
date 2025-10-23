@@ -30,7 +30,7 @@ class Net_RBAResample(L.LightningModule):
 
         self.enable_rbar = enable_rbar
 
-        self.final_learning_rate = torch.tensor(5e-5, dtype=torch.float32)
+        self.final_learning_rate = torch.tensor(1e-6, dtype=torch.float32)
         self.decay_rate = torch.tensor(0.99, dtype=torch.float32)
 
     # WARNING: if c_net is None, means normal rba weighted, else Time-dependent, need c_net to calculate gradient as weight.

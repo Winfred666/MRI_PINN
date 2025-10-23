@@ -6,9 +6,9 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: false
+continue_training: true
 
-ckpt_path: "tb_logs/seqtrain_ADPINN/dcpinn_full_251009_1607/checkpoints/last.ckpt"
+ckpt_path: "results/dcpinn_notd_denoise_KX78_H100_251022_1441/dcpinn_ad_pde_p.pth"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
 dcemrinp_data_path: "data/KX078_DCE_nii_data/dataset_downsampled.npz"
@@ -64,34 +64,40 @@ phases:
   #   batch_size: 400000
 
   init_c_denoise_data:
-    learning_rate: 0.002
-    max_epochs: 8000
+    learning_rate: 0.00001
+    max_epochs: 10
     batch_size: 400000
 
-  init_k_data:
-    learning_rate: 0.002
-    max_epochs: 4000
-    batch_size: 400000
+  # init_k_data:
+  #   learning_rate: 0.002
+  #   max_epochs: 4000
+  #   batch_size: 400000
 
-  init_p_data:
-    learning_rate: 0.002
-    max_epochs: 1500
-    batch_size: 400000
+  # init_p_data:
+  #   learning_rate: 0.002
+  #   max_epochs: 1500
+  #   batch_size: 400000
 
   filter:
     batch_size: 200000
 
   ad_pde_p:
+    incompressible: true
+    enable_td_weight: false
     learning_rate: 0.0005
-    max_epochs: 8000
+    max_epochs: 20000
     batch_size: 340000
 
   ad_pde_p_k:
-    learning_rate: 0.0005
-    max_epochs: 8000
+    incompressible: true
+    enable_td_weight: false
+    learning_rate: 0.0001
+    max_epochs: 30000
     batch_size: 340000
 
   joint_data+joint_ad_pde:
-    learning_rate: 0.0001
-    max_epochs: 8000
+    incompressible: true
+    enable_td_weight: false
+    learning_rate: 0.00008
+    max_epochs: 40000
     batch_size: 340000

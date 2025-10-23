@@ -34,8 +34,6 @@ dti_data_path: "data/KX078_DCE_nii_data/dti_tensor_3_3.mat"
 
 use_learnable_D: false
 
-incompressible: true
-
 # If true, use the Diffusion Tensor Imaging data for anisotropic diffusion.
 # If false, a single learnable isotropic diffusion coefficient is used.
 viscosity: 6.95e-4
@@ -63,10 +61,10 @@ phases:
   #   max_epochs: 4000
   #   batch_size: 600000
 
-  # init_c_denoise_data:
-  #   learning_rate: 0.002
-  #   max_epochs: 10
-  #   batch_size: 700000
+  init_c_denoise_data:
+    learning_rate: 0.002
+    max_epochs: 10
+    batch_size: 700000
 
   # init_k_data:
   #   learning_rate: 0.002
@@ -79,23 +77,23 @@ phases:
   #   batch_size: 700000
   
   # filter is a must if using ckpt to directly train pde.
-  filter:
-    batch_size: 200000
+  # filter:
+  #   batch_size: 200000
 
   ad_pde_p:
     incompressible: true
     learning_rate: 0.0001
-    max_epochs: 8000
+    max_epochs: 5000
     batch_size: 680000
 
   ad_pde_p_k:
     incompressible: true
     learning_rate: 0.0001
-    max_epochs: 8000
+    max_epochs: 20000
     batch_size: 680000
 
   joint_data+joint_ad_pde:
     incompressible: true
-    learning_rate: 0.00008
-    max_epochs: 8000
+    learning_rate: 0.00005
+    max_epochs: 20000
     batch_size: 680000

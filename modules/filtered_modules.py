@@ -94,8 +94,8 @@ def create_outlier_filter_mask(
             sigma_g = log_scaled_grads.std()
             
             # Define the valid range in log-space
-            log_lower_bound = mu_g - 3 * sigma_g
-            log_upper_bound = mu_g + 3 * sigma_g
+            log_lower_bound = mu_g - 4 * sigma_g
+            log_upper_bound = mu_g + 4 * sigma_g
             
             # Identify outliers ONLY among the significant gradients that were used for stats.
             outliers_in_significant = (
