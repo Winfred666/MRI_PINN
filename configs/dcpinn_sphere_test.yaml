@@ -6,7 +6,7 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: true
+continue_training: false
 
 ckpt_path: "results/dcpinn_sphere_test_251026_1640/dcpinn_ad_pde_p_k.pth"
 

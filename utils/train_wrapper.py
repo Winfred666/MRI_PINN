@@ -12,13 +12,15 @@ def train_all_phases(main_net, trainer_getter, train_config: Train_Config):
         filename="pinn-{epoch:04d}",
         monitor='hp_metric',
         save_top_k=2,
-        every_n_epochs=train_config.ckpt_save_val_interval
+        every_n_epochs=train_config.ckpt_save_val_interval,
+        auto_insert_metric_name=False
     )
     checkpoint_callback_latest = ModelCheckpoint(
         filename="pinn-latest-{epoch:04d}",
-        save_top_k=0,
-        save_last=True,
-        every_n_epochs=train_config.ckpt_save_val_interval
+        monitor='epoch',
+        save_top_k=1,
+        every_n_epochs=train_config.ckpt_save_val_interval,
+        auto_insert_metric_name=False
     )
     
     trainer = Trainer(

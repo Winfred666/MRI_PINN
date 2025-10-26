@@ -53,6 +53,11 @@ class Net_RBAResample(L.LightningModule):
 
         for i, (name, weight) in enumerate(self.rba_name_weight_list):
             pl = pointwise_loss_list[i]  # (N,1)
+            
+            # WARNING: to represent the true mean loss, do not log with RBA weight.
+            if batch_idx == 0:
+                self.log(f'train_{name}_loss', pl.mean())
+
             if self.enable_rbar:
                 # 3. Calculate RBA-weighted loss
                 old_lambda = getattr(self, name)
@@ -64,9 +69,6 @@ class Net_RBAResample(L.LightningModule):
                 rba_weighted_loss += weight * (old_lambda_part * pl.squeeze(-1) / (time_dependent_scaling + 1e-8)).mean()
             else:
                 rba_weighted_loss += weight * pl.mean()
-
-            if batch_idx == 0:
-                self.log(f'train_{name}_loss', pl.mean())
                 
         self.log('hp_metric', rba_weighted_loss) # for best checkpoint saving
         # 4. Manually optimize
