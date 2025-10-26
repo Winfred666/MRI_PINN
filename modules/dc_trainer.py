@@ -120,14 +120,19 @@ class DCPINN_Base(Net_RBAResample):
             # 5. log histogram of real mag of v , real k and real p(WARNING: all are in physical unit, filter out large amount of <=0 points for log scale)
             
             flag_v_mag = v_mag.flatten()
-            flag_v_mag = np.log(flag_v_mag[flag_v_mag > 1e-8])  # filter out very small values as paper visualized.
-            self.logger.experiment.add_histogram('val_v_hist', flag_v_mag, self.current_epoch)
+            flag_v_mag = np.log(flag_v_mag[flag_v_mag > 1e-9])  # filter out very small values as paper visualized.
+
+            # if has no element left, give up logging
+            if flag_v_mag.size > 0:
+                self.logger.experiment.add_histogram('val_v_hist', flag_v_mag, self.current_epoch)
             
             flat_k = self.ad_dc_net.v_dc_net.k_net.get_physical_volume().flatten()
             flat_k = np.log(flat_k[flat_k > 1e-10])  # filter out very small values as paper visualized.
-            if np.min(flat_k) <= 0:
-                flat_k = flat_k - np.min(flat_k) + 1e-3
-            self.logger.experiment.add_histogram('val_k_hist', flat_k, self.current_epoch)
+            # if has no element left, give up logging
+            if flat_k.size > 0:
+                if np.min(flat_k) <= 0:
+                    flat_k = flat_k - np.min(flat_k) + 1e-3
+                self.logger.experiment.add_histogram('val_k_hist', flat_k, self.current_epoch)
             
             # do not take log for pressure, only offset to calibrate the value.
             flat_p = self.ad_dc_net.v_dc_net.p_net.get_physical_volume(min_base=0).flatten()
