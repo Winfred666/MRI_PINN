@@ -60,36 +60,36 @@ phases:
   #   max_epochs: 500
   #   batch_size: 60000
 
-  # init_c_denoise_data:
-  #   learning_rate: 0.01
-  #   max_epochs: 500
-  #   batch_size: 30000
+  init_c_denoise_data:
+    learning_rate: 0.01
+    max_epochs: 400
+    batch_size: 30000
 
-  # init_k_data:
-  #   learning_rate: 0.01
-  #   max_epochs: 200
-  #   batch_size: 10000
+  init_k_data:
+    learning_rate: 0.01
+    max_epochs: 200
+    batch_size: 10000
 
-  # init_p_data:
-  #   learning_rate: 0.001
-  #   max_epochs: 1
-  #   batch_size: 10000
+  init_p_data:
+    learning_rate: 0.001
+    max_epochs: 1
+    batch_size: 10000
 
-  # filter:
-  #   batch_size: 20000
+  filter:
+    batch_size: 20000
   
-  # ad_pde_p:
-  #   incompressible: false
-  #   enable_td_weight: true
-  #   learning_rate: 0.0001
-  #   max_epochs: 500
-  #   batch_size: 18000
+  ad_pde_p:
+    incompressible: false
+    enable_td_weight: true
+    learning_rate: 0.0001
+    max_epochs: 200
+    batch_size: 18000
 
   ad_pde_p_k:
     incompressible: false
     enable_td_weight: true
     learning_rate: 0.001
-    max_epochs: 400
+    max_epochs: 200
     batch_size: 18500
 
   joint_data+joint_ad_pde:

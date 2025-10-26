@@ -118,7 +118,7 @@ def main(config_path):
                 c_dataset.setup()
                 return None, c_dataset
             if train_phase == ADPINN_PDE_V.train_phase: return ADPINN_PDE_V(ad_net, c_dataset.num_train_points), c_dataset
-            if train_phase == ADPINN_Joint.train_phase: return ADPINN_Joint(ad_net, c_dataset.num_train_points), c_dataset
+            if train_phase.startswith(ADPINN_Joint.train_phase): return ADPINN_Joint(ad_net, c_dataset.num_train_points), c_dataset
             raise ValueError(f"Unknown train_phase {train_phase}")
 
         net = AD_Net(c_layers=[4] + [cfg.neuron_num] * cfg.hid_layer_num + [1],

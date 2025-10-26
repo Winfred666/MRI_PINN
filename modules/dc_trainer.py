@@ -94,8 +94,10 @@ class DCPINN_Base(Net_RBAResample):
             
             # 2. Also calculate the norm of velocity field, slice at bottom of x domain to see willis ring
             v_mag = np.sqrt(vx**2 + vy**2 + vz**2).reshape(self.ad_dc_net.char_domain.domain_shape[:3])
-            slices_to_log = [10, 15]
-            # slices_to_log = [43, 45, 49, 50]
+
+            # WARNING: Modify here to change the visualization of z_slice_idx during training
+            # slices_to_log = [10, 15]
+            slices_to_log = [43, 45, 49, 50]
             slice_images = []
             for z_slice_idx in slices_to_log:
                 v_slice = v_mag[z_slice_idx, :, :].T
