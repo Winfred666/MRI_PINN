@@ -88,7 +88,7 @@ def main(config_path):
                 return None, c_dataset
             if train_phase == DCPINN_ADPDE_P.train_phase: return DCPINN_ADPDE_P(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight), c_dataset
             if train_phase == DCPINN_ADPDE_P_K.train_phase: return DCPINN_ADPDE_P_K(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight), c_dataset
-            if train_phase == DCPINN_Joint.train_phase: return DCPINN_Joint(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight), c_dataset
+            if train_phase.startswith(DCPINN_Joint.train_phase): return DCPINN_Joint(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight), c_dataset
             raise ValueError(f"Unknown train_phase {train_phase}")
 
         net = AD_DC_Net(c_layers=[4] + [cfg.c_neuron_num] * cfg.hid_layer_num + [1],

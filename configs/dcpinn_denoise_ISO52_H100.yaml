@@ -6,7 +6,7 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: true
+continue_training: false
 
 ckpt_path: "MRI_PINN/results/dcpinn_denoise_ISO52_H100_251017_1240/adpinn_init_p_data.pth"
 
@@ -63,7 +63,7 @@ phases:
 
   init_c_denoise_data:
     learning_rate: 0.002
-    max_epochs: 5000
+    max_epochs: 10000
     batch_size: 700000
 
   init_k_data:
@@ -81,12 +81,12 @@ phases:
 
   ad_pde_p:
     learning_rate: 0.0005
-    max_epochs: 8000
+    max_epochs: 4000
     batch_size: 680000
 
   ad_pde_p_k:
-    learning_rate: 0.0001
-    max_epochs: 8000
+    learning_rate: 0.00005
+    max_epochs: 2000
     batch_size: 680000
 
   joint_data+joint_ad_pde:

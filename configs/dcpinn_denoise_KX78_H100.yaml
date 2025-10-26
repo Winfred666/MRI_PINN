@@ -6,7 +6,7 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: true
+continue_training: false
 
 ckpt_path: "results/dcpinn_denoise_KX78_H100_251021_1932/adpinn_ad_pde_p.pth"
 
@@ -63,18 +63,18 @@ phases:
 
   init_c_denoise_data:
     learning_rate: 0.002
-    max_epochs: 10
+    max_epochs: 10000
     batch_size: 700000
 
-  # init_k_data:
-  #   learning_rate: 0.002
-  #   max_epochs: 4000
-  #   batch_size: 700000
+  init_k_data:
+    learning_rate: 0.002
+    max_epochs: 2000
+    batch_size: 700000
 
-  # init_p_data:
-  #   learning_rate: 0.002
-  #   max_epochs: 1500
-  #   batch_size: 700000
+  init_p_data:
+    learning_rate: 0.002
+    max_epochs: 1000
+    batch_size: 700000
   
   # filter is a must if using ckpt to directly train pde.
   # filter:
@@ -83,17 +83,17 @@ phases:
   ad_pde_p:
     incompressible: true
     learning_rate: 0.0001
-    max_epochs: 5000
+    max_epochs: 4000
     batch_size: 680000
 
   ad_pde_p_k:
     incompressible: true
-    learning_rate: 0.0001
-    max_epochs: 20000
+    learning_rate: 0.00005
+    max_epochs: 2000
     batch_size: 680000
 
   joint_data+joint_ad_pde:
     incompressible: true
-    learning_rate: 0.00005
-    max_epochs: 20000
+    learning_rate: 0.0001
+    max_epochs: 8000
     batch_size: 680000
