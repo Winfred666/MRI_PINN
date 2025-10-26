@@ -1,256 +1,320 @@
 import numpy as np
 from scipy.ndimage import map_coordinates
+import torch
+import torch.nn.functional as F
 
-def advection_step(C, vx, vy, vz, dt):
+# --- PyTorch configuration ---
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using device: {device}")
+
+def interpolate_tricubic_pytorch(volume, points):
     """
-    Performs one step of advection using a high-order Semi-Lagrangian method.
-    This implementation uses RK4 for temporal integration and cubic interpolation
-    for spatial accuracy, which is unconditionally stable and minimizes numerical diffusion.
+    Performs tricubic interpolation on a 3D volume at specified points.
+    This is a custom implementation since PyTorch's grid_sample doesn't support
+    bicubic mode for 3D data.
+    
     Args:
-        C (np.ndarray): 3D concentration field at time t, shape (nx, ny, nz).
-        vx, vy, vz (np.ndarray): 3D velocity component fields (assumed constant for dt).
-                                 The velocity is in voxel units per dt.
-        dt (float): Time step duration. For the semi-lagrangian scheme, this is
-                    used to scale the velocity field for the path tracing.
-                    The velocity vx, vy, vz should be in units of [voxels/dt].
-                    The RK4 integration happens over a normalized time [0, -1] * dt.
-
+        volume (torch.Tensor): The 3D volume of shape (nx, ny, nz).
+        points (torch.Tensor): The points to interpolate at, shape (..., 3).
+                               Coordinates are in voxel space.
     Returns:
-        np.ndarray: Advected 3D concentration field at time t + dt.
+        torch.Tensor: The interpolated values, shape (...).
+    """
+    nx, ny, nz = volume.shape
+    
+    # Get the integer and fractional parts of the coordinates
+    p_floor = torch.floor(points).long()
+    p_frac = points - p_floor.float()
+
+    # --- Catmull-Rom cubic interpolation kernel ---
+    def cubic_weights(frac):
+        w0 = -0.5 * frac + frac**2 - 0.5 * frac**3
+        w1 = 1.0 - 2.5 * frac**2 + 1.5 * frac**3
+        w2 = 0.5 * frac + 2.0 * frac**2 - 1.5 * frac**3
+        w3 = -0.5 * frac**2 + 0.5 * frac**3
+        return torch.stack([w0, w1, w2, w3], dim=-1)
+
+    # --- Gather data from the 4x4x4 neighborhood ---
+    # Create tensors to hold the 64 neighbor values for each point
+    neighbors = torch.zeros(points.shape[:-1] + (4, 4, 4), device=device, dtype=torch.float32)
+
+    for i in range(4):
+        for j in range(4):
+            for k in range(4):
+                # Get coordinates for the neighbor (i, j, k)
+                x_coords = torch.clamp(p_floor[..., 0] - 1 + i, 0, nx - 1)
+                y_coords = torch.clamp(p_floor[..., 1] - 1 + j, 0, ny - 1)
+                z_coords = torch.clamp(p_floor[..., 2] - 1 + k, 0, nz - 1)
+                
+                # Gather the value from the volume
+                neighbors[..., i, j, k] = volume[x_coords, y_coords, z_coords]
+
+    # --- Interpolate along each axis ---
+    # 1. Interpolate along Z
+    w_z = cubic_weights(p_frac[..., 2])
+    # ...ijk are the neighborhood dims, ...k are the weights. Sum over k.
+    interp_z = torch.einsum('...ijk,...k->...ij', neighbors, w_z)
+    # 2. Interpolate along Y
+    w_y = cubic_weights(p_frac[..., 1])
+    # ...ij are the interpolated planes, ...j are the weights. Sum over j.
+    interp_y = torch.einsum('...ij,...j->...i', interp_z, w_y)
+    # 3. Interpolate along X
+    w_x = cubic_weights(p_frac[..., 0])
+    # ...i are the interpolated lines, ...i are the weights. Sum over i.
+    final_interp = torch.einsum('...i,...i->...', interp_y, w_x)
+    return final_interp
+
+
+def advection_step_pytorch(C, vx, vy, vz, dt):
+    """
+    Performs one step of advection using PyTorch for GPU acceleration.
+    This implementation uses RK4 for temporal integration and custom tricubic interpolation.
     """
     nx, ny, nz = C.shape
     
-    # 1. Create a grid of destination coordinates (where we want to know the new C)
-    x_coords, y_coords, z_coords = np.indices((nx, ny, nz), dtype=np.float32)
-
-    # --- RK4 Back-tracing to find departure points ---
-    # We want to solve dX/dt = v(X) backward in time.
-    h = dt
-
-    # Initial positions are the grid points
-    p = np.stack([x_coords, y_coords, z_coords], axis=-1)
-
-    # k1: Evaluate velocity at the starting point (grid points)
-    # We need to interpolate the velocity field (vx, vy, vz) at arbitrary positions 'p'.
-    k1_vx = map_coordinates(vx, p.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k1_vy = map_coordinates(vy, p.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k1_vz = map_coordinates(vz, p.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k1 = np.stack([k1_vx, k1_vy, k1_vz], axis=-1)
-
-    # k2: Evaluate velocity at the midpoint using k1
-    p_k2 = p - 0.5 * h * k1
-    k2_vx = map_coordinates(vx, p_k2.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k2_vy = map_coordinates(vy, p_k2.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k2_vz = map_coordinates(vz, p_k2.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k2 = np.stack([k2_vx, k2_vy, k2_vz], axis=-1)
-
-    # k3: Evaluate velocity at the midpoint using k2
-    p_k3 = p - 0.5 * h * k2
-    k3_vx = map_coordinates(vx, p_k3.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k3_vy = map_coordinates(vy, p_k3.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k3_vz = map_coordinates(vz, p_k3.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k3 = np.stack([k3_vx, k3_vy, k3_vz], axis=-1)
-
-    # k4: Evaluate velocity at the endpoint using k3
-    p_k4 = p - h * k3
-    k4_vx = map_coordinates(vx, p_k4.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k4_vy = map_coordinates(vy, p_k4.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k4_vz = map_coordinates(vz, p_k4.transpose(3, 0, 1, 2), order=1, mode='nearest')
-    k4 = np.stack([k4_vx, k4_vy, k4_vz], axis=-1)
-    # Combine to get the final departure point
-    departure_points = p - (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-    
-    # --- FIX: Store min/max before interpolation to prevent overshooting ---
-    min_C, max_C = C.min(), C.max()
-
-    # 3. Interpolate the original concentration C at the more accurately traced departure points
-    # 'order=3' means cubic spline interpolation, which is much more accurate than linear.
-    # 'mode='nearest'' handles what to do for particles that trace back from outside the domain.
-    C_advected = map_coordinates(
-        input=C,
-        coordinates=departure_points.transpose(3, 0, 1, 2),
-        order=3, # Cubic interpolation for higher accuracy
-        mode='nearest' 
+    # Create a grid of destination coordinates
+    x_coords, y_coords, z_coords = torch.meshgrid(
+        torch.arange(nx, device=device, dtype=torch.float32),
+        torch.arange(ny, device=device, dtype=torch.float32),
+        torch.arange(nz, device=device, dtype=torch.float32),
+        indexing='ij'
     )
+    p = torch.stack([x_coords, y_coords, z_coords], dim=-1)
 
-    # --- FIX: Clip the result to prevent non-physical over/undershooting ---
-    np.clip(C_advected, min_C, max_C, out=C_advected)
+    # --- Helper for interpolation (using bilinear for speed on velocity) ---
+    def interpolate_velocity(v, points):
+        v_tensor = v.view(1, 1, nx, ny, nz)
+        normalized_points = 2.0 * points / torch.tensor([nx-1, ny-1, nz-1], device=device) - 1.0
+        grid = normalized_points.flip(dims=(-1,)).view(1, nx, ny, nz, 3)
+        return F.grid_sample(v_tensor, grid, mode='bilinear', padding_mode='border', align_corners=True).squeeze()
 
-    return C_advected
+    # --- RK4 Back-tracing ---
+    h = dt
+    k1 = torch.stack([interpolate_velocity(vx, p), interpolate_velocity(vy, p), interpolate_velocity(vz, p)], dim=-1)
+    p_k2 = p - 0.5 * h * k1
+    k2 = torch.stack([interpolate_velocity(vx, p_k2), interpolate_velocity(vy, p_k2), interpolate_velocity(vz, p_k2)], dim=-1)
+    p_k3 = p - 0.5 * h * k2
+    k3 = torch.stack([interpolate_velocity(vx, p_k3), interpolate_velocity(vy, p_k3), interpolate_velocity(vz, p_k3)], dim=-1)
+    p_k4 = p - h * k3
+    k4 = torch.stack([interpolate_velocity(vx, p_k4), interpolate_velocity(vy, p_k4), interpolate_velocity(vz, p_k4)], dim=-1)
+    
+    departure_points = p - (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
-def diffusion_step(C, D, dt, dx, dy, dz, num_sub_steps=5):
-    """
-    Performs one step of diffusion using an explicit finite difference method.
-    This method can handle a constant isotropic (scalar) or a spatially 
-    varying full anisotropic (tensor) diffusion coefficient.
+    # --- Interpolate concentration at departure points using custom tricubic---
+    min_C, max_C = C.min(), C.max()
+    
+    # C_advected = F.grid_sample(
+    #     C.view(1, 1, nx, ny, nz),
+    #     (2.0 * departure_points / torch.tensor([nx-1, ny-1, nz-1], device=device) - 1.0).flip(dims=(-1,)).view(1, nx, ny, nz, 3),
+    #     mode='bilinear',
+    #     padding_mode='border',
+    #     align_corners=True
+    # ).squeeze()
+    C_advected = interpolate_tricubic_pytorch(C, departure_points)
 
-    Args:
-        C (np.ndarray): 3D concentration field, shape (nx, ny, nz).
-        D (float or np.ndarray): Diffusion coefficient. Can be:
-            - A single float for constant, isotropic diffusion.
-            - An array of shape (nx, ny, nz, 3, 3) for a full diffusion tensor field.
-        dt (float): The total time step duration for this diffusion step (e.g., in s).
-        dx, dy, dz (float): Voxel dimensions (e.g., in mm).
-        num_sub_steps (int): Number of smaller time steps to take for stability.
+    # Clip to prevent overshooting, which can happen with cubic interpolation
+    return torch.clamp(C_advected, min_C, max_C)
 
-    Returns:
-        np.ndarray: Diffused 3D concentration field.
-    """
+
+def gradient_torch(f, dx, dy, dz):
+    """Computes the gradient of a 3D tensor using central differences."""
+    grad_x = (torch.roll(f, -1, dims=0) - torch.roll(f, 1, dims=0)) / (2 * dx)
+    grad_y = (torch.roll(f, -1, dims=1) - torch.roll(f, 1, dims=1)) / (2 * dy)
+    grad_z = (torch.roll(f, -1, dims=2) - torch.roll(f, 1, dims=2)) / (2 * dz)
+    # Handle boundaries with forward/backward differences
+    grad_x[0, :, :] = (f[1, :, :] - f[0, :, :]) / dx
+    grad_x[-1, :, :] = (f[-1, :, :] - f[-2, :, :]) / dx
+    grad_y[:, 0, :] = (f[:, 1, :] - f[:, 0, :]) / dy
+    grad_y[:, -1, :] = (f[:, -1, :] - f[:, -2, :]) / dy
+    grad_z[:, :, 0] = (f[:, :, 1] - f[:, :, 0]) / dz
+    grad_z[:, :, -1] = (f[:, :, -1] - f[:, :, -2]) / dz
+    return grad_x, grad_y, grad_z
+
+def divergence_torch(fx, fy, fz, dx, dy, dz):
+    """Computes the divergence of a 3D vector field."""
+    dfx_dx, _, _ = gradient_torch(fx, dx, dy, dz)
+    _, dfy_dy, _ = gradient_torch(fy, dx, dy, dz)
+    _, _, dfz_dz = gradient_torch(fz, dx, dy, dz)
+    return dfx_dx + dfy_dy + dfz_dz
+
+def laplacian_torch(f, dx, dy, dz):
+    """Computes the Laplacian of a 3D tensor."""
+    grad_x, grad_y, grad_z = gradient_torch(f, dx, dy, dz)
+    return divergence_torch(grad_x, grad_y, grad_z, dx, dy, dz)
+
+
+def diffusion_step_pytorch(C, D, dt, dx, dy, dz, num_sub_steps=5):
+    """Performs one step of diffusion using PyTorch for GPU acceleration."""
     sub_dt = dt / num_sub_steps
-    C_new = C.copy()
+    C_new = C.clone()
 
     for _ in range(num_sub_steps):
-        # Use np.pad for Neumann boundary conditions (gradient is zero at the boundary)
-        C_padded = np.pad(C_new, 1, mode='edge')
-
         if isinstance(D, (float, int)):
-            # Case 1: D is a constant scalar. Use simple Laplacian.
-            d2C_dx2 = (C_padded[2:, 1:-1, 1:-1] - 2*C_new + C_padded[:-2, 1:-1, 1:-1]) / (dx*dx)
-            d2C_dy2 = (C_padded[1:-1, 2:, 1:-1] - 2*C_new + C_padded[1:-1, :-2, 1:-1]) / (dy*dy)
-            d2C_dz2 = (C_padded[1:-1, 1:-1, 2:] - 2*C_new + C_padded[1:-1, 1:-1, :-2]) / (dz*dz)
-            C_new += sub_dt * D * (d2C_dx2 + d2C_dy2 + d2C_dz2)
+            # Case 1: D is a constant scalar
+            laplacian_C = laplacian_torch(C_new, dx, dy, dz)
+            C_new += sub_dt * D * laplacian_C
         
-        elif D.ndim == 5 and D.shape[-2:] == (3, 3):
-            # Case 2: D is a full tensor field (nx, ny, nz, 3, 3).
-            # We need to compute ∇ ⋅ (D ∇C).
-            
-            # 1. Compute gradients of C (dC/dx, dC/dy, dC/dz) at cell centers
-            grad_C_x = (C_padded[2:, 1:-1, 1:-1] - C_padded[:-2, 1:-1, 1:-1]) / (2 * dx)
-            grad_C_y = (C_padded[1:-1, 2:, 1:-1] - C_padded[1:-1, :-2, 1:-1]) / (2 * dy)
-            grad_C_z = (C_padded[1:-1, 1:-1, 2:] - C_padded[1:-1, 1:-1, :-2]) / (2 * dz)
+        elif D.ndim == 5: # D is a tensor field
+            # 1. Compute gradient of concentration ∇C
+            grad_C_x, grad_C_y, grad_C_z = gradient_torch(C_new, dx, dy, dz)
+            grad_C_vec = torch.stack([grad_C_x, grad_C_y, grad_C_z], dim=-1)
 
-            # 2. Compute the flux vector J = D * ∇C at each cell center
-            # Jx = Dxx*dC/dx + Dxy*dC/dy + Dxz*dC/dz
-            # Jy = Dyx*dC/dx + Dyy*dC/dy + Dyz*dC/dz
-            # Jz = Dzx*dC/dx + Dzy*dC/dy + Dzz*dC/dz
-            flux_x = D[..., 0, 0] * grad_C_x + D[..., 0, 1] * grad_C_y + D[..., 0, 2] * grad_C_z
-            flux_y = D[..., 1, 0] * grad_C_x + D[..., 1, 1] * grad_C_y + D[..., 1, 2] * grad_C_z
-            flux_z = D[..., 2, 0] * grad_C_x + D[..., 2, 1] * grad_C_y + D[..., 2, 2] * grad_C_z
-
-            # Pad the flux components to compute their divergence
-            flux_x_padded = np.pad(flux_x, 1, mode='edge')
-            flux_y_padded = np.pad(flux_y, 1, mode='edge')
-            flux_z_padded = np.pad(flux_z, 1, mode='edge')
-
-            # 3. Compute the divergence of the flux: ∇·J = d(Jx)/dx + d(Jy)/dy + d(Jz)/dz
-            div_flux_x = (flux_x_padded[2:, 1:-1, 1:-1] - flux_x_padded[:-2, 1:-1, 1:-1]) / (2 * dx)
-            div_flux_y = (flux_y_padded[1:-1, 2:, 1:-1] - flux_y_padded[1:-1, :-2, 1:-1]) / (2 * dy)
-            div_flux_z = (flux_z_padded[1:-1, 1:-1, 2:] - flux_z_padded[1:-1, 1:-1, :-2]) / (2 * dz)
+            # 2. Compute flux J = D @ ∇C
+            flux = torch.einsum('...ij,...j->...i', D, grad_C_vec)
             
-            divergence_of_flux = div_flux_x + div_flux_y + div_flux_z
-            
+            # 3. Compute divergence of the flux vector ∇·J
+            divergence_of_flux = divergence_torch(flux[..., 0], flux[..., 1], flux[..., 2], dx, dy, dz)
             C_new += sub_dt * divergence_of_flux
+        elif D.ndim == 0: # D is a scalar tensor
+            laplacian_C = laplacian_torch(C_new, dx, dy, dz)
+            C_new += sub_dt * D.item() * laplacian_C
         else:
             raise ValueError(f"Unsupported shape for diffusion coefficient D: {D.shape}")
             
     return C_new
 
+
 def advect_diffuse_forward_simulation(
     C_initial, vx, vy, vz, D, 
     total_time, num_steps=10, 
-    voxel_dims=(0.1, 0.1, 0.1)
+    voxel_dims=(0.1, 0.1, 0.1),
+    use_gpu=True
 ):
     """
     Runs a full forward simulation using operator splitting.
-
-    Args:
-        C_initial (np.ndarray): The initial 3D concentration field, shape (nx,nz,ny).
-        vx, vy, vz (np.ndarray): The static 3D velocity fields, each shape (nx,nz,ny).
-        D (float or (x,y,z,3,3) np.ndarray): Diffusion coefficient or tensor (e.g., min^2/min)
-        total_time (float): Total simulation time (e.g., 10 min).
-        num_steps (int): Number of sub-steps for the simulation, set bigger for more accuracy.
-        voxel_dims (tuple): Physical size of a voxel (dx, dy, dz) in mm.
-
-    Returns:
-        list[np.ndarray]: A list of the concentration fields at each time step, each shape (nx,ny,nz).
+    Can use NumPy (use_gpu=False) or PyTorch (use_gpu=True).
     """
+    if use_gpu and device.type == 'cpu':
+        print("Warning: GPU not available, falling back to CPU. PyTorch simulation may be slow.")
+    
     dt = total_time / num_steps
     dx, dy, dz = voxel_dims
 
-    # --- Important: Convert physical velocity to voxel velocity ---
-    # The advection step needs velocity in units of [voxels / dt]
-    vx_vox_dt = vx / dx * dt
-    vy_vox_dt = vy / dy * dt
-    vz_vox_dt = vz / dz * dt
+    if use_gpu:
+        # --- PyTorch Simulation ---
+        C_current = torch.from_numpy(C_initial.copy()).to(device, dtype=torch.float32)
+        vx_t = torch.from_numpy(vx).to(device, dtype=torch.float32)
+        vy_t = torch.from_numpy(vy).to(device, dtype=torch.float32)
+        vz_t = torch.from_numpy(vz).to(device, dtype=torch.float32)
+        D_t = torch.from_numpy(D).to(device, dtype=torch.float32) if isinstance(D, np.ndarray) else D
 
-    C_current = C_initial.copy()
-    simulation_frames = [C_current]
+        vx_vox_dt = vx_t / dx * dt
+        vy_vox_dt = vy_t / dy * dt
+        vz_vox_dt = vz_t / dz * dt
+        
+        simulation_frames = [C_current.cpu().numpy()]
 
-    print(f"Running simulation {total_time} min config in {num_steps} steps (dt={dt:.2f}min)")
-    for i in range(num_steps):
-        # Operator Splitting: First advect, then diffuse the result.
-        
-        # 1. Advection step
-        C_advected = advection_step(C_current, vx_vox_dt, vy_vox_dt, vz_vox_dt, dt=1.0) # dt is baked into velocity
-        
-        # 2. Diffusion step
-        C_diffused = diffusion_step(C_advected, D, dt, dx, dy, dz)
-        
-        C_current = C_diffused
-        simulation_frames.append(C_current)
-        # if (i+1) % 10 == 0:
-        #     print(f"  Step {i+1}/{num_steps} complete.")
+        print(f"Running PyTorch simulation on {device} for {total_time}s in {num_steps} steps (dt={dt:.3f}s)")
+        for i in range(num_steps):
+            C_advected = advection_step_pytorch(C_current, vx_vox_dt, vy_vox_dt, vz_vox_dt, dt=1.0)
+            C_diffused = diffusion_step_pytorch(C_advected, D_t, dt, dx, dy, dz)
+            C_current = C_diffused
+            simulation_frames.append(C_current.cpu().numpy())
     print("Simulation complete.")
     return simulation_frames
 
 
-
-# --- EXAMPLE USAGE ---
-if __name__ == "__main__":
-    # Setup your parameters
-    D_coeff = 0.0  # mm^2/s (from the paper)
-    voxel_size_mm = 0.1 # mm
-    dt_mri = 60 # seconds between MRI frames
-    # Assume you have these from your PINN and data:
-    # C_observed_t0: The 3D concentration frame at time t=0 (your starting point)
-    # velocity_field_u, velocity_field_v, velocity_field_w: The 3D velocity fields (in mm/s)
-    # C_observed_t1: The "ground truth" concentration at the next MRI frame (t=60s)
-
-    # --- Generate the data for the example ---
-    nx, ny, nz = (64, 64, 32)
-    C_observed_t0 = np.zeros((nx, ny, nz))
-    half_size = nx // 4  # 32 wide/high total for nx=ny=64
+def generate_block_concentration(nx, ny, nz, noise_level=0.0):
+    """Generates a central block of concentration for demonstration."""
+    C_initial = np.zeros((nx, ny, nz))
+    half_size = nx // 5
     cx, cy = nx // 2, ny // 2
     x0, x1 = cx - half_size, cx + half_size
     y0, y1 = cy - half_size, cy + half_size
-    z0, z1 = nz // 2 - 2, nz // 2 + 2  # keep 4-slice thickness
-    C_observed_t0[x0:x1, y0:y1, z0:z1] = 100.0
+    z0, z1 = nz // 5*2, nz // 5 * 3  # keep 4-slice thickness
+    C_initial[x0:x1, y0:y1, z0:z1] = 100.0
+    if noise_level > 0:
+        noise = np.random.normal(0, noise_level, C_initial.shape)
+        C_initial += noise
+    return C_initial
 
-    # Swirl velocity field around z-axis (constant tangential speed v0)
-    v0 = 0.03  # mm/s
+def generate_swirl_velocity_field(nx, ny, nz, voxel_size_mm, v0=0.03):
+    """Generates a swirl velocity field around the z-axis for demonstration."""
     velocity_field_u = np.zeros((nx, ny, nz), dtype=float)
     velocity_field_v = np.zeros((nx, ny, nz), dtype=float)
     velocity_field_w = np.zeros((nx, ny, nz), dtype=float)
 
     # Center of rotation in physical units (mm)
-    x0 = (nx - 1) * voxel_size_mm / 2.0
-    y0 = (ny - 1) * voxel_size_mm / 2.0
+    center_x_mm = (nx - 1) * voxel_size_mm / 2.0
+    center_y_mm = (ny - 1) * voxel_size_mm / 2.0
 
     for ix in range(nx):
         x_mm = ix * voxel_size_mm
         for iy in range(ny):
             y_mm = iy * voxel_size_mm
-            dx_mm = x_mm - x0
-            dy_mm = y_mm - y0
+            dx_mm = x_mm - center_x_mm
+            dy_mm = y_mm - center_y_mm
             r = np.hypot(dx_mm, dy_mm)
 
             if r > 1e-12:
-                # ux = -v0 * 10 * voxel_size_mm
-                # vy =  v0 * 10 * voxel_size_mm
-                ux = -v0 * (r**2) * (dy_mm / r)  # -sin(theta), bigger r -> faster
-                vy =  v0 * (r**2) * (dx_mm / r)  #  cos(theta)
+                # Velocity magnitude increases with the square of the radius
+                ux = -v0 * (r**2) * (dy_mm / r)
+                vy =  v0 * (r**2) * (dx_mm / r)
             else:
-                ux = 0.0
-                vy = 0.0
-            for iz in range(nz):
-                velocity_field_u[ix, iy, iz] = ux
-                velocity_field_v[ix, iy, iz] = vy
-                velocity_field_w[ix, iy, iz] = 0.0
-    # --- End of example data generation ---
+                ux, vy = 0.0, 0.0
+            
+            # Apply the same 2D velocity to all z-slices
+            velocity_field_u[ix, iy, :] = ux
+            velocity_field_v[ix, iy, :] = vy
+            # velocity_field_w remains 0.0
+
+    return velocity_field_u, velocity_field_v, velocity_field_w
 
 
-    # Run the simulation from one MRI frame to the next
-    # Use several sub-steps for accuracy
+# v_cell_val is about how many cell move per time unit(minute). 1 means 1 voxel per minute
+def generate_constant_velocity_field(nx, ny, nz, voxel_size_mm, v_cell_val=(1.0,1.0,1.0)):
+    """Generates a constant velocity field for demonstration."""
+    velocity_field_u = np.full((nx, ny, nz), v_cell_val[0] * voxel_size_mm, dtype=float)
+    velocity_field_v = np.full((nx, ny, nz), v_cell_val[1] * voxel_size_mm, dtype=float)
+    velocity_field_w = np.full((nx, ny, nz), v_cell_val[2] * voxel_size_mm, dtype=float)
+    return velocity_field_u, velocity_field_v, velocity_field_w
+
+# could also generate D_coeff as a tensor field if needed
+def generate_diffusion_coefficient_field(nx, ny, nz, voxel_size_mm, D_eigvecs, D_eigvals):
+    """Generates a tensor diffusion coefficient field."""
+    D_tensor = np.zeros((nx, ny, nz, 3, 3), dtype=float)
+    for i in range(nx):
+        for j in range(ny):
+            for k in range(nz):
+                D_tensor[i, j, k] = D_eigvecs @ np.diag(D_eigvals) @ D_eigvecs.T
+    return D_tensor
+
+# --- EXAMPLE USAGE ---
+if __name__ == "__main__":
+    # 1. Setup simulation parameters
+    voxel_size_mm = 0.1 # mm
+    dt_mri = 60 # seconds between MRI frames
+    nx, ny, nz = (64, 64, 32)
+
+    # 2. Generate initial data
+    
+    # 2.1 D_coeff: Diffusion coefficient (in mm^2/s)
+    # D_coeff = 1e-3  # mm^2/s, constant
+    # Set D_eigen vectors as a transformed matrix
+    D_eigvals = np.array([0.0005, 0.0001, 0.00001])  # mm^2/s
+    D_eigvecs = np.array([
+        [np.cos(np.pi * 10), -np.sin(np.pi * 10), 0],
+        [np.sin(np.pi / 4),  np.cos(np.pi / 4), 0],
+        [0, 0, 1]
+    ]).T
+    D_coeff = generate_diffusion_coefficient_field(
+        nx, ny, nz, voxel_size_mm, D_eigvecs, D_eigvals
+    )
+    
+    # 2.2 C_observed_t0: The 3D concentration frame at time t=0 (your starting point)
+    C_observed_t0 = generate_block_concentration(nx, ny, nz)
+    
+    # 2.3 velocity_field_u,v,w: The 3D velocity fields (in mm/s)
+    # velocity_field_u, velocity_field_v, velocity_field_w = generate_swirl_velocity_field(
+    #     nx, ny, nz, voxel_size_mm, v0=0.03
+    # )
+    velocity_field_u, velocity_field_v, velocity_field_w = generate_constant_velocity_field(
+        nx, ny, nz, voxel_size_mm, v_cell_val=(0.1, 0.1, 0.0)
+    )
+
+
+    # 3. Run the simulation from one MRI frame to the next
+    # Use a high number of sub-steps for accuracy
     simulation_results = advect_diffuse_forward_simulation(
         C_initial=C_observed_t0,
         vx=velocity_field_u,
@@ -258,14 +322,15 @@ if __name__ == "__main__":
         vz=velocity_field_w,
         D=D_coeff,
         total_time=dt_mri,
-        num_steps=500, # More sub-steps lead to higher accuracy
-        voxel_dims=(voxel_size_mm, voxel_size_mm, voxel_size_mm)
+        num_steps=100, # More sub-steps lead to higher accuracy, but slower.
+        voxel_dims=(voxel_size_mm, voxel_size_mm, voxel_size_mm),
+        use_gpu=True # Set to True to use PyTorch and GPU
     )
 
     # The final frame of the simulation is your prediction for the next MRI frame
     C_predicted_t1 = simulation_results[-1]
 
-    # You can also visualize the results (e.g., using matplotlib)
+    # 4. Visualize the results
     import matplotlib.pyplot as plt
 
     mid_slice_idx = nz // 2
@@ -283,7 +348,7 @@ if __name__ == "__main__":
     last_im = None
     for ax, idx in zip(axes.flat, idxs):
         frame = simulation_results[idx]
-        last_im = ax.imshow(frame[:, :, mid_slice_idx], vmin=vmin, vmax=vmax, cmap="viridis")
+        last_im = ax.imshow(frame[:, :, mid_slice_idx].T, vmin=vmin, vmax=vmax, cmap="viridis")
         ax.set_title(f"t = {idx * dt_sub:.1f}s")
         ax.axis("off")
 

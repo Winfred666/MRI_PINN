@@ -33,9 +33,9 @@ class CharacteristicDomain():
 
     def set_DTI_or_coef(self, DTI_or_coef):
         # if we already using DTI, then we should set Pe = 3.0 (water/tracer's diffusivity)
-        self.Pe_g = (self.V_star.mean() * self.L_star.mean() * DTI_or_coef) if isinstance(DTI_or_coef, float) else 3.0  # global Peclet number
-        # for better leverage 
-        self.DTI_or_coef = torch.tensor(DTI_or_coef, dtype=torch.float32).to(self.device) # either a float (isotropic coeff) tensor or a (nx,ny,nz,3,3) tensor
+        self.Pe_g = (self.V_star.mean() * self.L_star.mean() / DTI_or_coef) if isinstance(DTI_or_coef, float) else 3.0  # global Peclet number
+        # for better leverage
+        self.DTI_or_coef = torch.tensor(DTI_or_coef, dtype=torch.float32).to(self.device)  # either a float (isotropic coeff) tensor or a (nx,ny,nz,3,3) tensor
         if not isinstance(DTI_or_coef, float):
             self.DTI_or_coef = self.DTI_or_coef.permute(3, 4, 0, 1, 2).reshape(1, 9, *self.DTI_or_coef.shape[0:3]) # shape: (1, 9, Nx, Ny, Nz)
 

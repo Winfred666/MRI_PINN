@@ -94,8 +94,8 @@ class DCPINN_Base(Net_RBAResample):
             
             # 2. Also calculate the norm of velocity field, slice at bottom of x domain to see willis ring
             v_mag = np.sqrt(vx**2 + vy**2 + vz**2).reshape(self.ad_dc_net.char_domain.domain_shape[:3])
-            # slices_to_log = [10, 15]
-            slices_to_log = [43, 45, 49, 50]
+            slices_to_log = [10, 15]
+            # slices_to_log = [43, 45, 49, 50]
             slice_images = []
             for z_slice_idx in slices_to_log:
                 v_slice = v_mag[z_slice_idx, :, :].T
@@ -292,6 +292,7 @@ class DCPINN_ADPDE_P_K(DCPINN_ADPDE_P):
             p.requires_grad = True
 
 
+# WARNING: when joint optimize c_net, still need to using denoised one.
 class DCPINN_Joint(DCPINN_Base):
     """Joint optimization of c_net, k_net, p_net with data + PDE + optional divergence losses.
     Batch: (Xt, X_train_indice, c_observed)
@@ -304,8 +305,8 @@ class DCPINN_Joint(DCPINN_Base):
                  ad_dc_net: AD_DC_Net,
                  num_train_points,
                  incompressible=False,
-                 data_weight=10.0,
-                 pde_weight=1.0,
+                 data_weight=5.0,
+                 pde_weight=2.0,
                  div_weight=1e-5,
                  learning_rate=1e-5,
                  rba_learning_rate=0.1,
@@ -334,11 +335,10 @@ class DCPINN_Joint(DCPINN_Base):
         self.enable_td_weight = enable_td_weight
 
     def training_step(self, batch, batch_idx):
-        Xt, X_train_indice, c_observed = batch
-        x_full = torch.cat(Xt, dim=1)
-        c_pred = self.ad_dc_net.c_net(x_full)
-        data_w = 1.0 + 0.09 * c_observed  # same heuristic
-        data_pointwise = data_w * (c_pred - c_observed) ** 2
+        Xt, X_train_indice, _ = batch
+        
+        # WARNING: by default use denoised data loss to calculate joint loss as it performs better.
+        data_pointwise, _ , _ = self.ad_dc_net.c_net.calculate_denoise_loss(batch)
 
         pde_residual = self.ad_dc_net.pde_residual(Xt)
         pde_pointwise = pde_residual ** 2

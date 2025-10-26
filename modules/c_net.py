@@ -73,6 +73,16 @@ class C_Net(nn.Module):
             hidden_features=c_layers[1],
         )
 
+        # --- Denoise Module ---
+        self.noise_mlp = MLP(
+            input_dim=c_input_dim,
+            output_dim=1,
+            hidden_layers=5,  # from Table D.8
+            hidden_features=66
+        )
+        self.sigma_reg_weight = 0.001 # Regularization weight for sigma
+        self.sigma_0 = 0.01  # minimum noise level
+
         # --- Keep validation attributes ---
         self.val_slice_z = [char_domain.domain_shape[2] // 2 - 6, char_domain.domain_shape[2] // 2, char_domain.domain_shape[2] // 2 + 6]
         base_t = char_domain.domain_shape[3] // 4 * 2
@@ -84,10 +94,41 @@ class C_Net(nn.Module):
         self.val_slice_gt_c = self.gt_data[:, :, Z, T]
 
     def forward(self, X_train):
-        # Explicitly define the forward pass logic
+        # Explicitly define the forward pass logic for concentration
         if self.c_pos_encoder:
-            X_train = self.c_pos_encoder(X_train)
-        return self.c_mlp(X_train)
+            encoded_X = self.c_pos_encoder(X_train)
+        else:
+            encoded_X = X_train
+        return self.c_mlp(encoded_X)
+
+    def sigma_forward(self, X_train):
+        # Forward pass for the noise prediction
+        if self.c_pos_encoder:
+            txyz_freq = self.c_pos_encoder(X_train)
+        else:
+            txyz_freq = X_train
+        predicted_sigma = 10.0 * torch.sigmoid(self.noise_mlp(txyz_freq)) + self.sigma_0
+        return predicted_sigma
+
+    # Here the batch is c_dataset training point.
+    def calculate_denoise_loss(self, batch):
+        Xt, _, c_observed = batch
+        X_full = torch.cat(Xt, dim=1)
+        c_clean_pred = self.forward(X_full)
+        sigma_pred = self.sigma_forward(X_full)
+        # Negative log likelihood per-point
+        errp2 = (c_observed - c_clean_pred) ** 2
+        eps = 1e-8
+        log_term = torch.log((sigma_pred / self.sigma_0) ** 2 + eps) / 2
+        quad_term = errp2 / (2.0 * (sigma_pred ** 2 + eps))
+        nll_loss = log_term + quad_term
+
+        if self.sigma_reg_weight > 0:
+            target = errp2 + eps
+            reg = (torch.log(sigma_pred ** 2 + eps) - torch.log(target)) ** 2
+            nll_loss = nll_loss + self.sigma_reg_weight * reg
+
+        return nll_loss, sigma_pred, errp2
 
     def draw_concentration_slices(self, ):
         with torch.no_grad():
