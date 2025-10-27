@@ -84,6 +84,8 @@ phases:
     learning_rate: 0.0001
     max_epochs: 200
     batch_size: 18000
+    
+    validate_v_slices: [15,20,24]
 
   ad_pde_p_k:
     incompressible: false
@@ -92,9 +94,14 @@ phases:
     max_epochs: 200
     batch_size: 18500
 
+    validate_v_slices: [15,20,24]
+
+
   joint_data+joint_ad_pde:
     incompressible: false
     enable_td_weight: true
     learning_rate: 0.001
     max_epochs: 500
     batch_size: 18500
+    
+    validate_v_slices: [15,20,24]

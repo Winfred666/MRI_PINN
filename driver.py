@@ -76,6 +76,7 @@ def main(config_path):
             nonlocal c_dataset # Allow modification of the outer scope c_dataset
             incompressible = phase_cfg.get("incompressible", False)
             enable_td_weight = phase_cfg.get("enable_td_weight", True)
+            validate_v_slices = phase_cfg.get("validate_v_slices", [43, 45, 49, 50])
             if train_phase == CNet_Init.train_phase: return CNet_Init(ad_dc_net.c_net, c_dataset.num_train_points), c_dataset
             if train_phase == CNet_DenoiseInit.train_phase: return CNet_DenoiseInit(ad_dc_net.c_net, c_dataset.num_train_points), c_dataset
             if train_phase == DCPINN_InitK.train_phase: return DCPINN_InitK(ad_dc_net, k_dataset.num_train_points), k_dataset
@@ -86,9 +87,9 @@ def main(config_path):
                 c_dataset = FilteredDCEMRIDataModule(c_dataset, valid_mask)
                 c_dataset.setup()
                 return None, c_dataset
-            if train_phase == DCPINN_ADPDE_P.train_phase: return DCPINN_ADPDE_P(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight), c_dataset
-            if train_phase == DCPINN_ADPDE_P_K.train_phase: return DCPINN_ADPDE_P_K(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight), c_dataset
-            if train_phase.startswith(DCPINN_Joint.train_phase): return DCPINN_Joint(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight), c_dataset
+            if train_phase == DCPINN_ADPDE_P.train_phase: return DCPINN_ADPDE_P(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight, validate_v_slices=validate_v_slices), c_dataset
+            if train_phase == DCPINN_ADPDE_P_K.train_phase: return DCPINN_ADPDE_P_K(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight, validate_v_slices=validate_v_slices), c_dataset
+            if train_phase.startswith(DCPINN_Joint.train_phase): return DCPINN_Joint(ad_dc_net, c_dataset.num_train_points, incompressible=incompressible, enable_td_weight=enable_td_weight, validate_v_slices=validate_v_slices), c_dataset
             raise ValueError(f"Unknown train_phase {train_phase}")
 
         net = AD_DC_Net(c_layers=[4] + [cfg.c_neuron_num] * cfg.hid_layer_num + [1],

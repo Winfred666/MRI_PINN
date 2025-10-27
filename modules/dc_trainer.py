@@ -19,7 +19,7 @@ class DCPINN_Base(Net_RBAResample):
                  rba_memory=0.999,
                  distribution_shapness=2.0,
                  base_probability=0.5,
-                 enable_rbar=True):
+                 enable_rbar=True,validate_v_slices=[43, 45, 49, 50]):
         super().__init__(rba_name_weight_list,
                          num_train_points,
                          rba_learning_rate,
@@ -34,6 +34,7 @@ class DCPINN_Base(Net_RBAResample):
         # self.v_dc_net = ad_dc_net.v_dc_net
         self.learning_rate = learning_rate
         self.L2_loss = nn.MSELoss()
+        self.validate_v_slices = validate_v_slices  # list of z slice indices to visualize velocity slices
 
     def validate_forward_step(self, vx, vy, vz, t_index, t_jump):
         # transfer v back to mm/min, so that time like t_index and t_jump is appropriate.
@@ -96,10 +97,8 @@ class DCPINN_Base(Net_RBAResample):
             v_mag = np.sqrt(vx**2 + vy**2 + vz**2).reshape(self.ad_dc_net.char_domain.domain_shape[:3])
 
             # WARNING: Modify here to change the visualization of z_slice_idx during training
-            # slices_to_log = [10, 15]
-            slices_to_log = [43, 45, 49, 50]
             slice_images = []
-            for z_slice_idx in slices_to_log:
+            for z_slice_idx in self.validate_v_slices:
                 v_slice = v_mag[z_slice_idx, :, :].T
                 slice_img_whc = draw_colorful_slice_image(v_slice, 'jet')
                 slice_images.append(slice_img_whc)
@@ -228,7 +227,8 @@ class DCPINN_ADPDE_P(DCPINN_Base):
                  rba_memory=0.999,
                  enable_rbar=True,
                  enable_td_weight=True,
-                 advpde_loss_name="ad_pde_p"):
+                 advpde_loss_name="ad_pde_p",
+                 validate_v_slices=[43, 45, 49, 50]):
         rba_list = [(advpde_loss_name, 1.0)]
         self.incompressible = incompressible
         if incompressible:
@@ -239,7 +239,8 @@ class DCPINN_ADPDE_P(DCPINN_Base):
                          learning_rate=learning_rate,
                          rba_learning_rate=rba_learning_rate,
                          rba_memory=rba_memory,
-                         enable_rbar=enable_rbar)
+                         enable_rbar=enable_rbar,
+                         validate_v_slices=validate_v_slices)
         # Freeze c & K
         for p in self.ad_dc_net.c_net.parameters():
             p.requires_grad = False
@@ -279,7 +280,8 @@ class DCPINN_ADPDE_P_K(DCPINN_ADPDE_P):
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
                  enable_rbar=True,
-                 enable_td_weight=True):
+                 enable_td_weight=True,
+                 validate_v_slices=[43, 45, 49, 50]):
         super().__init__(ad_dc_net,
                          num_train_points,
                          incompressible=incompressible,
@@ -289,7 +291,8 @@ class DCPINN_ADPDE_P_K(DCPINN_ADPDE_P):
                          rba_memory=rba_memory,
                          enable_rbar=enable_rbar,
                          enable_td_weight=enable_td_weight,
-                         advpde_loss_name=DCPINN_ADPDE_P_K.train_phase)
+                         advpde_loss_name=DCPINN_ADPDE_P_K.train_phase,
+                         validate_v_slices=validate_v_slices)
         # Freeze c_net, Unfreeze k_net and p_net
         for c in self.ad_dc_net.c_net.parameters():
             c.requires_grad = False
@@ -319,7 +322,8 @@ class DCPINN_Joint(DCPINN_Base):
                  rba_learning_rate=0.1,
                  rba_memory=0.999,
                  enable_rbar=True,
-                 enable_td_weight=True):
+                 enable_td_weight=True,
+                 validate_v_slices=[43, 45, 49, 50]):
         rba_list = [("joint_data", data_weight), ("joint_ad_pde", pde_weight)]
         self.incompressible = incompressible
         if incompressible:
@@ -330,7 +334,8 @@ class DCPINN_Joint(DCPINN_Base):
                          learning_rate=learning_rate,
                          rba_learning_rate=rba_learning_rate,
                          rba_memory=rba_memory,
-                         enable_rbar=enable_rbar)
+                         enable_rbar=enable_rbar,
+                         validate_v_slices=validate_v_slices)
         # Unfreeze all
         for p in self.ad_dc_net.c_net.parameters():
             p.requires_grad = True
