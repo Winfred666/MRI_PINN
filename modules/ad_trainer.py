@@ -40,10 +40,10 @@ class ADPINN_Base(Net_RBAResample):
     #     params = [p for p in self.parameters() if p.requires_grad]
     #     return torch.optim.AdamW(params, lr=self.learning_rate)
 
+    # accept v in units mm/min
     def validate_forward_step(self, vx, vy, vz, t_index, t_jump):
-        # transfer v back to mm/min, so that time like t_index and t_jump is appropriate.
         char_domain = self.ad_net.char_domain
-        vx, vy, vz = vx * char_domain.V_star[0], vy * char_domain.V_star[1], vz * char_domain.V_star[2]
+        # vx, vy, vz = vx * char_domain.V_star[0], vy * char_domain.V_star[1], vz * char_domain.V_star[2]
         # visualize how concentration field advects and diffuses in one step
         # get spatial points at t_index and t_index + 1
         start_c = self.ad_net.c_net.gt_data[:, :, :, t_index]

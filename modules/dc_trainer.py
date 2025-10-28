@@ -36,10 +36,10 @@ class DCPINN_Base(Net_RBAResample):
         self.L2_loss = nn.MSELoss()
         self.validate_v_slices = validate_v_slices  # list of z slice indices to visualize velocity slices
 
+    # accept v of mm/min (physical space), so that time like t_index and t_jump is appropriate.
     def validate_forward_step(self, vx, vy, vz, t_index, t_jump):
-        # transfer v back to mm/min, so that time like t_index and t_jump is appropriate.
         char_domain = self.ad_dc_net.char_domain
-        vx, vy, vz = vx * char_domain.V_star[0], vy * char_domain.V_star[1], vz * char_domain.V_star[2]
+        # vx, vy, vz = vx * char_domain.V_star[0], vy * char_domain.V_star[1], vz * char_domain.V_star[2]
         # visualize how concentration field advects and diffuses in one step
         # get spatial points at t_index and t_index + 1
         start_c = self.ad_dc_net.c_net.gt_data[:, :, :, t_index]

@@ -6,7 +6,7 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: false
+continue_training: true
 
 ckpt_path: "checkpoints/pinn-epoch=1299.ckpt"
 

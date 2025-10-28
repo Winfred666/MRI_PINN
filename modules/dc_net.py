@@ -183,6 +183,7 @@ class V_DC_Net(nn.Module):
         div_v = v_grad_x[:, 0:1] + v_grad_y[:, 1:2] + v_grad_z[:, 2:3]
         return div_v
     
+    # Get vx,vy,vz in unit of physical velocity
     def draw_velocity_volume(self):
         """
         mask: (nx, ny, nz) using that in char_domain
