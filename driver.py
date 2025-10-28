@@ -158,10 +158,10 @@ def main(config_path):
         
     print(f"Learned diffusivity D: {D_learned}")
 
-    # Convert velocity to physical units (cell/min)
-    vx = vx * (char_domain.V_star[0] / char_domain.pixdim[0])
-    vy = vy * (char_domain.V_star[1] / char_domain.pixdim[1])
-    vz = vz * (char_domain.V_star[2] / char_domain.pixdim[2])
+    # Convert velocity to units (cell/min)
+    vx = vx  / char_domain.pixdim[0]
+    vy = vy  / char_domain.pixdim[1]
+    vz = vz  / char_domain.pixdim[2]
     print(f"Velocity ranges (vx, vy, vz): ({vx.min():.3f}, {vx.max():.3f}), ({vy.min():.3f}, {vy.max():.3f}), ({vz.min():.3f}, {vz.max():.3f})")
 
     # Save velocity field for external analysis (e.g., MATLAB)

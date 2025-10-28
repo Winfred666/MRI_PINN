@@ -6,9 +6,9 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: true
+continue_training: false
 
-ckpt_path: "checkpoints/pinn-epoch=1299.ckpt"
+ckpt_path: "results/adpinn_joint_ad_pde+joint_data.pth"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
 dcemrinp_data_path: "data/test_nii_data/dataset_downsampled.npz"
@@ -17,7 +17,8 @@ dcemrinp_data_path: "data/test_nii_data/dataset_downsampled.npz"
 
 # --- Model Architecture ---
 neuron_num: 150
-c_neuron_num: 200
+# WARNING: could set c_neuron_num larger
+c_neuron_num: 150
 
 hid_layer_num: 5
 
