@@ -214,14 +214,16 @@ def advect_diffuse_forward_simulation(
     return simulation_frames
 
 
-def generate_block_concentration(nx, ny, nz, noise_level=0.0):
+def generate_block_concentration(nx, ny, nz, noise_level=0.0, center=(0.5,0.5,0.5), size=(0.2,0.2,0.5)):
     """Generates a central block of concentration for demonstration."""
     C_initial = np.zeros((nx, ny, nz))
-    half_size = nx // 5
-    cx, cy = nx // 2, ny // 2
-    x0, x1 = cx - half_size, cx + half_size
-    y0, y1 = cy - half_size, cy + half_size
-    z0, z1 = nz // 5*2, nz // 5 * 3  # keep 4-slice thickness
+    half_size_x = max(1, int(nx * size[0] / 2))
+    half_size_y = max(1, int(ny * size[1] / 2))
+    half_size_z = max(1, int(nz * size[2] / 2))
+    cx, cy, cz = int(nx * center[0]), int(ny * center[1]), int(nz * center[2])
+    x0, x1 = max(0, cx - half_size_x), min(nx, cx + half_size_x)
+    y0, y1 = max(0, cy - half_size_y), min(ny, cy + half_size_y)
+    z0, z1 = max(0, cz - half_size_z), min(nz, cz + half_size_z)
     C_initial[x0:x1, y0:y1, z0:z1] = 100.0
     if noise_level > 0:
         noise = np.random.normal(0, noise_level, C_initial.shape)

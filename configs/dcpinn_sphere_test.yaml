@@ -8,7 +8,7 @@ do_training: true
 # If true, resume training from the specified checkpoint.
 continue_training: false
 
-ckpt_path: "results/dcpinn_sphere_test_251026_1640/dcpinn_ad_pde_p_k.pth"
+ckpt_path: "results/dcpinn_sphere_test_251027_1944/dcpinn_ad_pde_p_k.pth"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
 dcemrinp_data_path: "data/test_nii_data/dataset_downsampled.npz"
@@ -22,7 +22,7 @@ hid_layer_num: 5
 
 # --- Feature Engineering ---
 positional_encoding:
-  use: true
+  use: false
   freq_nums: [20, 20, 20, 0] # Frequencies for (x, y, z, t)
   freq_scale: 1.0
 
@@ -49,7 +49,7 @@ reload_dataloaders_every_n_epochs: 20
 ckpt_save_val_interval: 20
 # How often to run validation and save checkpoints (in epochs).
 
-dataset_num_workers: 2
+dataset_num_workers: 8
 # Number of worker processes for loading data.
 
 # --- Training Phases ---
@@ -63,17 +63,17 @@ phases:
   init_c_denoise_data:
     learning_rate: 0.01
     max_epochs: 400
-    batch_size: 30000
+    batch_size: 300000
 
   init_k_data:
-    learning_rate: 0.01
-    max_epochs: 200
-    batch_size: 10000
+     learning_rate: 0.01
+     max_epochs: 200
+     batch_size: 100000
 
   init_p_data:
     learning_rate: 0.001
-    max_epochs: 1
-    batch_size: 10000
+    max_epochs: 200
+    batch_size: 100000
 
   filter:
     batch_size: 20000
@@ -82,26 +82,26 @@ phases:
     incompressible: false
     enable_td_weight: true
     learning_rate: 0.0001
-    max_epochs: 200
-    batch_size: 18000
+    max_epochs: 1000
+    batch_size: 100000
     
-    validate_v_slices: [15,20,24]
+    validate_v_slices: [15,20,25,30]
 
   ad_pde_p_k:
     incompressible: false
     enable_td_weight: true
-    learning_rate: 0.001
-    max_epochs: 200
-    batch_size: 18500
+    learning_rate: 0.0001
+    max_epochs: 1000
+    batch_size: 100000
 
-    validate_v_slices: [15,20,24]
+    validate_v_slices: [15,20,25,30]
 
 
-  joint_data+joint_ad_pde:
+  joint_ad_pde+joint_data:
     incompressible: false
     enable_td_weight: true
-    learning_rate: 0.001
+    learning_rate: 0.0001
     max_epochs: 500
-    batch_size: 18500
+    batch_size: 100000
     
-    validate_v_slices: [15,20,24]
+    validate_v_slices: [15,20,25,30]

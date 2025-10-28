@@ -141,7 +141,7 @@ def main(config_path):
             pinn_model = trainer_getter(checkpoint.get("train_phase"), net)[0]
             pinn_model.load_state_dict(checkpoint['state_dict'], strict=True)
         else: # Fallback for older checkpoints
-            pinn_model = trainer_getter("joint_data+joint_ad_pde" if cfg.model_type == 'dc' else "ad_joint", net)[0]
+            pinn_model = trainer_getter("joint_ad_pde+joint_data" if cfg.model_type == 'dc' else "ad_joint", net)[0]
             net.load_state_dict(checkpoint['state_dict'], strict=False)
 
     # --- 6. Post-Processing and Saving Results ---

@@ -9,18 +9,16 @@ def train_all_phases(main_net, trainer_getter, train_config: Train_Config):
                                version=train_config.result_folder.split('/')[-1])
     # save every N epochs
     checkpoint_callback_best = ModelCheckpoint(
-        filename="pinn-{epoch:04d}",
+        filename="pinn-{epoch:04d}-{hp_metric:.6f}",
         monitor='hp_metric',
         save_top_k=2,
-        every_n_epochs=train_config.ckpt_save_val_interval,
-        auto_insert_metric_name=False
     )
+
     checkpoint_callback_latest = ModelCheckpoint(
         filename="pinn-latest-{epoch:04d}",
         monitor='epoch',
         save_top_k=1,
         every_n_epochs=train_config.ckpt_save_val_interval,
-        auto_insert_metric_name=False
     )
     
     trainer = Trainer(

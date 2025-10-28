@@ -309,7 +309,7 @@ class DCPINN_Joint(DCPINN_Base):
     Default weights: data=1.0, pde=10.0, div=1.0 (if incompressible)
     """
 
-    train_phase = "joint_data+joint_ad_pde"
+    train_phase = "joint_ad_pde+joint_data"
 
     def __init__(self,
                  ad_dc_net: AD_DC_Net,
@@ -324,7 +324,7 @@ class DCPINN_Joint(DCPINN_Base):
                  enable_rbar=True,
                  enable_td_weight=True,
                  validate_v_slices=[43, 45, 49, 50]):
-        rba_list = [("joint_data", data_weight), ("joint_ad_pde", pde_weight)]
+        rba_list = [("joint_ad_pde", pde_weight), ("joint_data", data_weight)]
         self.incompressible = incompressible
         if incompressible:
             rba_list.append(("joint_div", div_weight))

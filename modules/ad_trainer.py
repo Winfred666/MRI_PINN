@@ -3,6 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from modules.rba_resample_trainer import Net_RBAResample
+from utils.forward_sim import advect_diffuse_forward_simulation
 
 
 class ADPINN_Base(Net_RBAResample):
@@ -39,6 +40,40 @@ class ADPINN_Base(Net_RBAResample):
     #     params = [p for p in self.parameters() if p.requires_grad]
     #     return torch.optim.AdamW(params, lr=self.learning_rate)
 
+    def validate_forward_step(self, vx, vy, vz, t_index, t_jump):
+        # transfer v back to mm/min, so that time like t_index and t_jump is appropriate.
+        char_domain = self.ad_net.char_domain
+        vx, vy, vz = vx * char_domain.V_star[0], vy * char_domain.V_star[1], vz * char_domain.V_star[2]
+        # visualize how concentration field advects and diffuses in one step
+        # get spatial points at t_index and t_index + 1
+        start_c = self.ad_net.c_net.gt_data[:, :, :, t_index]
+        end_c = self.ad_net.c_net.gt_data[:, :, :, t_index + t_jump]
+
+        # we are not using training c_dataset (half of whole data), so no need to *2 for duration.
+        t_duration = char_domain.t[t_index + t_jump] - char_domain.t[t_index]  # in min
+        
+        # D is the real diffusion coefficient(tensor with ndim 0 or (nx,ny,nz,3,3)), in mm^2/min
+        if char_domain.DTI_or_coef.ndim == 0:
+            D = self.ad_net.D.detach().cpu().numpy()
+        else:
+            D = char_domain.DTI_or_coef * self.ad_net.D
+            # reshape (1, 9, Nx, Ny, Nz) back to (nx,ny,nz,3,3)
+            D = D.permute(2, 3, 4, 0, 1).reshape(*D.shape[2:], 3, 3).detach().cpu().numpy()
+        num_steps = int(t_duration * 2)  # 0.5 min per step
+        frames = advect_diffuse_forward_simulation(start_c, vx, vy, vz, D, t_duration,
+                                                   num_steps=num_steps,
+                                                   voxel_dims=char_domain.pixdim) # 4 min between frame.
+        z_slice = char_domain.domain_shape[2] // 2
+        
+        # now return a stack of volume slice, start, end and error, ready for tensorboard
+        slices = [frames[0][:,:,z_slice], frames[num_steps//2][:,:,z_slice], 
+                  frames[-1][:,:,z_slice], end_c[:,:,z_slice], np.abs((frames[-1]-end_c)[:,:,z_slice])]
+        slices = np.vstack(slices)
+        # clip the negative value, normalize to [0,1] for better visualization
+        slices = np.clip(slices, 0, None)
+        slices = slices / (np.max(slices) + 1e-8)
+        return slices  # shape (4, nx, ny)
+
     # already setting check_val_every_n_epoch
     def validation_step(self, batch, batch_idx):
         """
@@ -58,6 +93,10 @@ class ADPINN_Base(Net_RBAResample):
             rgb_img, vx, vy, vz = self.v_net.draw_velocity_volume()
             self.logger.experiment.add_image('val_v_quiver', rgb_img, self.current_epoch, dataformats='HWC')
 
+            self.logger.experiment.add_image('val_adv_diff_step', 
+                                             self.validate_forward_step(vx, vy, vz, t_index=0, 
+                                                                        t_jump=8), self.current_epoch, dataformats='WH')
+        
             # log velocity histogram
             flat_v = np.sqrt(vx**2 + vy**2 + vz**2).flatten()
             if np.min(flat_v) <= 0:
@@ -150,7 +189,7 @@ class ADPINN_Joint(ADPINN_Base):
     Weight 10.0 is applied inside Net_RBAResample for sampling & optimization.
     """
 
-    train_phase = "joint_data+joint_ad_pde"
+    train_phase = "joint_ad_pde+joint_data"
 
     def __init__(self,
                  ad_net: AD_Net,
@@ -161,8 +200,8 @@ class ADPINN_Joint(ADPINN_Base):
                  enable_rbar=True):
         super().__init__(ad_net,
                          num_train_points,
-                         rba_name_weight_list=[("joint_data", 1.0),
-                                               ("joint_ad_pde", 10.0)],
+                         rba_name_weight_list=[("joint_ad_pde", 2.0),
+                                               ("joint_data", 5.0)],
                          learning_rate=learning_rate,
                          rba_learning_rate=rba_learning_rate,
                          rba_memory=rba_memory,

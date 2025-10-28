@@ -25,7 +25,7 @@ hid_layer_num: 5
 
 # --- Feature Engineering ---
 positional_encoding:
-  use: true
+  use: false
   freq_nums: [20, 20, 20, 0] # Frequencies for (x, y, z, t)
   freq_scale: 1.0
 
@@ -76,7 +76,7 @@ phases:
     max_epochs: 10
     batch_size: 20000
 
-  joint_data+joint_ad_pde:
+  joint_ad_pde+joint_data:
     learning_rate: 0.002
     max_epochs: 10
     batch_size: 20000

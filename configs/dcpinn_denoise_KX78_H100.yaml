@@ -92,7 +92,7 @@ phases:
     max_epochs: 2000
     batch_size: 680000
 
-  joint_data+joint_ad_pde:
+  joint_ad_pde+joint_data:
     incompressible: true
     learning_rate: 0.0001
     max_epochs: 8000
