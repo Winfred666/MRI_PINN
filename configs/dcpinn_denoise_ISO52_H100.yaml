@@ -6,9 +6,9 @@
 do_training: true
 
 # If true, resume training from the specified checkpoint.
-continue_training: false
+continue_training: true
 
-ckpt_path: "MRI_PINN/results/dcpinn_denoise_ISO52_H100_251017_1240/adpinn_init_p_data.pth"
+ckpt_path: "results/dcpinn_denoise_ISO52_H100_251026_2215/dcpinn_joint_data+joint_ad_pde.pth"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
 dcemrinp_data_path: "data/ISO052_DCE_nii_data/dataset_downsampled.npz"
@@ -63,31 +63,31 @@ phases:
 
   init_c_denoise_data:
     learning_rate: 0.002
-    max_epochs: 10000
+    max_epochs: 1000
     batch_size: 700000
 
-  init_k_data:
-    learning_rate: 0.002
-    max_epochs: 4000
-    batch_size: 700000
+  # init_k_data:
+  #   learning_rate: 0.002
+  #   max_epochs: 4000
+  #   batch_size: 700000
 
   init_p_data:
     learning_rate: 0.002
-    max_epochs: 1500
+    max_epochs: 1
     batch_size: 700000
 
   filter:
     batch_size: 200000
 
-  ad_pde_p:
-    learning_rate: 0.0005
-    max_epochs: 4000
-    batch_size: 680000
+  # ad_pde_p:
+  #   learning_rate: 0.0005
+  #   max_epochs: 4000
+  #   batch_size: 680000
 
-  ad_pde_p_k:
-    learning_rate: 0.00005
-    max_epochs: 2000
-    batch_size: 680000
+  # ad_pde_p_k:
+  #   learning_rate: 0.00005
+  #   max_epochs: 2000
+  #   batch_size: 680000
 
   joint_ad_pde+joint_data:
     learning_rate: 0.00008

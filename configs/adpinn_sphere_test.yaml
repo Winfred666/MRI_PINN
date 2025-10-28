@@ -18,7 +18,7 @@ dcemrinp_data_path: "data/test_nii_data/dataset_downsampled.npz"
 # --- Model Architecture ---
 neuron_num: 150
 # WARNING: could set c_neuron_num larger
-c_neuron_num: 150
+c_neuron_num: 200
 
 hid_layer_num: 5
 
@@ -65,20 +65,20 @@ phases:
   
   init_c_denoise_data:
     learning_rate: 0.002
-    max_epochs: 400
-    batch_size: 20000
+    max_epochs: 800
+    batch_size: 300000
 
   init_v_data:
     learning_rate: 0.002
     max_epochs: 200
-    batch_size: 20000
+    batch_size: 100000
 
   ad_pde_v:
     learning_rate: 0.002
     max_epochs: 500
-    batch_size: 20000
+    batch_size: 100000
 
   joint_ad_pde+joint_data:
     learning_rate: 0.002
-    max_epochs: 500
-    batch_size: 20000
+    max_epochs: 1000
+    batch_size: 100000
