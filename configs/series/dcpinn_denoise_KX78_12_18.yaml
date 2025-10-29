@@ -1,5 +1,5 @@
-# the default output folder name in <results> 
-# is the config file name without extension. 
+# the default output folder name in <results>
+# is the config file name without extension.
 
 # --- Training Control ---
 # If false, load a model from ckpt_path for inference without training.
@@ -8,10 +8,10 @@ do_training: true
 # If true, resume training from the specified checkpoint.
 continue_training: false
 
-ckpt_path: "results/dcpinn_sphere_test_251027_1944/dcpinn_ad_pde_p_k.pth"
+ckpt_path: "results/dcpinn_notd_denoise_KX78_H100_251022_1441/dcpinn_ad_pde_p.pth"
 
 # Use mri_dataset_generator.ipynb to generate the downsampled dataset.
-dcemrinp_data_path: "data/test_nii_data/dataset_downsampled.npz"
+dcemrinp_data_path: "data/KX078_DCE_nii_data/dataset_downsampled_12_18.npz"
 
 # Path to the checkpoint file for continuing training or for inference.
 
@@ -22,20 +22,21 @@ hid_layer_num: 5
 
 # --- Feature Engineering ---
 positional_encoding:
-  use: false
+  use: true
   freq_nums: [20, 20, 20, 0] # Frequencies for (x, y, z, t)
   freq_scale: 1.0
 
 cuda_visible_devices: [0]
 
 # --- Physics & PDE Configuration ---
-use_DTI: false
+use_DTI: true
 dti_data_path: "data/KX078_DCE_nii_data/dti_tensor_3_3.mat"
+
 use_learnable_D: false
 
 # If true, use the Diffusion Tensor Imaging data for anisotropic diffusion.
 # If false, a single learnable isotropic diffusion coefficient is used.
-viscosity: 6.95e-4 
+viscosity: 6.95e-4
 
 # --- RBAR (Residual-Based Attention Resampling) ---
 enable_rbar: true
@@ -43,65 +44,58 @@ enable_rbar: true
 # This can slow down training epochs but may lead to faster convergence.
 
 # --- Dataloader & Checkpointing Settings ---
-reload_dataloaders_every_n_epochs: 20
+reload_dataloaders_every_n_epochs: 100
 # How often to re-evaluate RBAR weights. Set to 0 if RBAR is disabled.
 
-ckpt_save_val_interval: 20
+ckpt_save_val_interval: 100
 # How often to run validation and save checkpoints (in epochs).
 
-dataset_num_workers: 8
+dataset_num_workers: 16
 # Number of worker processes for loading data.
 
 # --- Training Phases ---
 # Define the sequence of training stages. The keys determine the order.
 phases:
   # init_c_data:
-  #   learning_rate: 0.01
-  #   max_epochs: 500
-  #   batch_size: 60000
+  #   learning_rate: 0.0005
+  #   max_epochs: 4000
+  #   batch_size: 400000
 
   init_c_denoise_data:
-    learning_rate: 0.01
-    max_epochs: 800
-    batch_size: 300000
+    learning_rate: 0.0001
+    max_epochs: 6000
+    batch_size: 100000
 
   init_k_data:
-     learning_rate: 0.01
-     max_epochs: 200
-     batch_size: 100000
+    learning_rate: 0.002
+    max_epochs: 4000
+    batch_size: 100000
 
   init_p_data:
-    learning_rate: 0.001
-    max_epochs: 200
+    learning_rate: 0.002
+    max_epochs: 1500
     batch_size: 100000
 
   filter:
     batch_size: 20000
-  
+
   ad_pde_p:
-    incompressible: false
+    incompressible: true
     enable_td_weight: true
-    learning_rate: 0.0001
-    max_epochs: 400
-    batch_size: 100000
-    
-    validate_v_slices: [15,20,25,30]
+    learning_rate: 0.0005
+    max_epochs: 2000
+    batch_size: 80000
 
   ad_pde_p_k:
-    incompressible: false
+    incompressible: true
     enable_td_weight: true
-    learning_rate: 0.0001
-    max_epochs: 400
-    batch_size: 100000
-
-    validate_v_slices: [15,20,25,30]
-
+    learning_rate: 0.00005
+    max_epochs: 2000
+    batch_size: 80000
 
   joint_ad_pde+joint_data:
-    incompressible: false
+    incompressible: true
     enable_td_weight: true
-    learning_rate: 0.0001
-    max_epochs: 2000
-    batch_size: 100000
-    
-    validate_v_slices: [15,20,25,30]
+    learning_rate: 0.00008
+    max_epochs: 8000
+    batch_size: 80000

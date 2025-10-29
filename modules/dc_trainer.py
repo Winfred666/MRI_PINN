@@ -108,7 +108,7 @@ class DCPINN_Base(Net_RBAResample):
             # 3. visualize one adv-diff step
             self.logger.experiment.add_image('val_adv_diff_step', 
                                              self.validate_forward_step(vx, vy, vz, t_index=0, 
-                                                                        t_jump=8), self.current_epoch, dataformats='WH')
+                                                                        t_jump=5), self.current_epoch, dataformats='WH')
             # 4. visualize k and p slices
             k_vis = self.ad_dc_net.v_dc_net.k_net.draw_physical_slices() # shaped (H,W,C)
             self.logger.experiment.add_image('val_k_slices', k_vis, self.current_epoch, dataformats='HWC')
@@ -315,8 +315,8 @@ class DCPINN_Joint(DCPINN_Base):
                  ad_dc_net: AD_DC_Net,
                  num_train_points,
                  incompressible=False,
-                 data_weight=5.0,
-                 pde_weight=2.0,
+                 data_weight=10.0,
+                 pde_weight=1.0,
                  div_weight=1e-5,
                  learning_rate=1e-5,
                  rba_learning_rate=0.1,

@@ -9,13 +9,13 @@ def train_all_phases(main_net, trainer_getter, train_config: Train_Config):
                                version=train_config.result_folder.split('/')[-1])
     # save every N epochs
     checkpoint_callback_best = ModelCheckpoint(
-        filename="pinn-{epoch:04d}-{hp_metric:.6f}",
+        filename="pinn-{epoch}-{hp_metric:.6f}",
         monitor='hp_metric',
         save_top_k=2,
     )
 
     checkpoint_callback_latest = ModelCheckpoint(
-        filename="pinn-latest-{epoch:04d}",
+        filename="pinn-latest-{epoch}",
         monitor='epoch',
         save_top_k=1,
         every_n_epochs=train_config.ckpt_save_val_interval,
@@ -70,8 +70,17 @@ def train_all_phases(main_net, trainer_getter, train_config: Train_Config):
         trainer.logger.experiment.add_text("phase/start", phase, global_step=trainer.global_step)
         
         if continue_training_from_ckpt:
-            print("load from checkpoint strictly:", continue_training_from_ckpt_strict)
-            pinn_model.load_state_dict(checkpoint['state_dict'], strict=continue_training_from_ckpt_strict)
+            print("load from checkpoint...")
+            loading_report =  pinn_model.load_state_dict(checkpoint['state_dict'], strict=continue_training_from_ckpt_strict)
+            
+            print(f"Checkpoint loading report:")
+            if loading_report.missing_keys:
+                print(f"  - Missing keys in model: {loading_report.missing_keys}")
+            if loading_report.unexpected_keys:
+                print(f"  - Unexpected keys in checkpoint: {loading_report.unexpected_keys}")
+            if not loading_report.missing_keys and not loading_report.unexpected_keys:
+                print("  - All keys matched successfully.")
+
             continue_training_from_ckpt = False # only use for the first phase
 
         # WARNING: here direcly continue training from checkpoint if specified and last_model is None
