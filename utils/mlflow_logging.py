@@ -1,10 +1,29 @@
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
+import re
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+
+def _phase_scope(logger: Any) -> str:
+    phase_name = str(getattr(logger, "active_phase", "") or "").strip()
+    if not phase_name:
+        return ""
+    return re.sub(r"[^0-9A-Za-z_.\-]", "_", phase_name)
+
+
+def _scoped_key(logger: Any, key: str, prefix: str) -> str:
+    key_str = str(key).strip().strip("/")
+    if not key_str:
+        return key_str
+    phase_scope = _phase_scope(logger)
+    if not phase_scope:
+        return key_str
+    return f"{prefix}/{phase_scope}/{key_str}"
 
 
 def log_image_artifact(
@@ -24,7 +43,7 @@ def log_image_artifact(
     run_id = getattr(logger, "run_id", None)
     if experiment is None or run_id is None:
         return
-    image_key_str = str(image_key).strip()
+    image_key_str = _scoped_key(logger, image_key, prefix="validation")
     if not image_key_str:
         raise ValueError("image_key must be a non-empty string for comparable image-series logging.")
     image_array = np.asarray(image)
@@ -79,6 +98,27 @@ def log_histogram_artifact(
     if image.ndim == 3 and image.shape[-1] == 4:
         image = image[..., :3]
     log_image_artifact(logger=logger, image=image, image_key=hist_key_str, step=step)
+
+
+def log_file_artifact(
+    logger: Any,
+    local_path: str,
+    artifact_path: str | None = None,
+) -> None:
+    """Persist a local file as an MLflow artifact for the active run."""
+    if logger is None or logger is False:
+        return
+    experiment = getattr(logger, "experiment", None)
+    run_id = getattr(logger, "run_id", None)
+    if experiment is None or run_id is None:
+        return
+
+    path_obj = Path(local_path)
+    if not path_obj.is_file():
+        raise FileNotFoundError(f"Artifact file not found: {local_path}")
+
+    artifact_path_str = str(artifact_path).strip().strip("/") if artifact_path else None
+    experiment.log_artifact(run_id=run_id, local_path=str(path_obj), artifact_path=artifact_path_str)
 
 
 def log_text_artifact(

@@ -35,7 +35,28 @@ class DCPINN_Base(Net_RBAResample):
         # self.v_dc_net = ad_dc_net.v_dc_net
         self.learning_rate = learning_rate
         self.L2_loss = nn.MSELoss()
-        self.validate_v_slices = validate_v_slices  # list of z slice indices to visualize velocity slices
+        self.validate_v_slices = self._build_safe_slice_indices(
+            validate_v_slices,
+            total_size=self.ad_dc_net.char_domain.domain_shape[2],
+        )
+
+    @staticmethod
+    def _build_safe_slice_indices(requested_slices, total_size):
+        total_size = int(total_size)
+        if total_size <= 0:
+            return [0]
+
+        safe = []
+        for idx in requested_slices:
+            idx_i = int(np.clip(idx, 0, total_size - 1))
+            if idx_i not in safe:
+                safe.append(idx_i)
+
+        if safe:
+            return safe
+
+        fallback = np.linspace(0, total_size - 1, num=min(4, total_size), dtype=int)
+        return list(dict.fromkeys(int(v) for v in fallback))
 
     # accept v of mm/min (physical space), so that time like t_index and t_jump is appropriate.
     def validate_forward_step(self, vx, vy, vz, t_index, t_jump):

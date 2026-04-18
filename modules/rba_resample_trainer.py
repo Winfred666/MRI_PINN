@@ -8,6 +8,10 @@ class Net_RBAResample(L.LightningModule):
     
     # give every training phase a name(its loss) for checkpoint saving,
     def on_save_checkpoint(self, checkpoint):
+        phase_name = getattr(self, "train_phase", None)
+        if phase_name:
+            checkpoint["train_phase"] = str(phase_name)
+            return
         checkpoint['train_phase'] = "+".join(
             [self.rba_name_weight_list[i][0] for i in range(len(self.rba_name_weight_list))])
 

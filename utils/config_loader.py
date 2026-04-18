@@ -9,13 +9,12 @@ class Train_Config:
             config = yaml.safe_load(f)
 
         self.model_type = 'ad' if 'adpinn' in os.path.basename(yaml_path).lower() else 'dc'
+        self.yaml_path = os.path.abspath(yaml_path)
 
         # output_tag should be set as name + date of yaml file
-        self.result_folder = "results/" + yaml_path.split('/')[-1].replace('.yaml', '') + \
+        self.run_name = yaml_path.split('/')[-1].replace('.yaml', '') + \
         f"_{datetime.now().strftime('%y%m%d_%H%M')}"
-
-        # create folder if not exist
-        os.makedirs(self.result_folder, exist_ok=True)
+        self.result_folder = os.path.join("results", self.run_name)
 
         # firstly just release all attributes in config dict, check later
         for key, value in config.items():
@@ -68,7 +67,6 @@ class Train_Config:
         self.logging_backend = str(logging_cfg.get('backend', 'mlflow')).lower()
         self.mlflow_tracking_uri = str(logging_cfg.get('tracking_uri', 'http://172.100.100.100:5000'))
         self.mlflow_experiment = str(logging_cfg.get('experiment', 'mr-aiv'))
-        self.mlflow_log_model = bool(logging_cfg.get('log_model', False))
 
         # --- Training Phases ---
         self.phases = config.get('phases', {})
@@ -85,7 +83,3 @@ class Train_Config:
             raise ValueError("'do_training' is false, but 'ckpt_path' for inference is not provided.")
         if self.use_DTI and not self.dti_data_path:
             raise ValueError("'use_DTI' is true, but 'dti_data_path' is not provided.")
-        
-        # Also save a copy of the config file to result folder
-        with open(os.path.join(self.result_folder, 'config.yaml'), 'w') as f:
-            yaml.dump(config, f)

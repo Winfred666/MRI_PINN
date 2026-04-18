@@ -181,6 +181,7 @@ def main(config_path):
     )
 
     # Save velocity field for external analysis (e.g., MATLAB)
+    os.makedirs(cfg.result_folder, exist_ok=True)
     save_path = f"{cfg.result_folder}/predict_velocity.mat"
     if cfg.model_type == 'dc':
         D_to_save = pinn_model.ad_dc_net.D.item() if not cfg.use_DTI else pinn_model.ad_dc_net.D_normalized.item()
