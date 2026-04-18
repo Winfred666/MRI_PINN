@@ -56,7 +56,7 @@ run_case() {
   log_path="results/slurm_logs/${case_name}-${SLURM_JOB_ID}.log"
 
   echo "CASE_START ${case_name} $(date -Iseconds) log=${log_path}"
-  python driver.py "$cfg" > "$log_path" 2>&1
+  python -u driver.py "$cfg" > "$log_path" 2>&1
   local status=$?
 
   if [ "$status" -eq 0 ]; then
