@@ -26,6 +26,11 @@ class Train_Config:
         self.continue_training = config.get('continue_training', False)
         self.ckpt_path = config.get('ckpt_path')
         self.dcemrinp_data_path = config.get('dcemrinp_data_path')
+        self.brain_mask_path = config.get('brain_mask_path')
+        raw_frame_numbers = config.get('frame_numbers')
+        self.frame_numbers = tuple(int(v) for v in raw_frame_numbers) if raw_frame_numbers else None
+        if self.frame_numbers is not None and len(self.frame_numbers) < 2:
+            raise ValueError("'frame_numbers' must contain at least two frame IDs.")
 
         # --- Model Architecture ---
         self.neuron_num = config.get('neuron_num', 150)
@@ -56,6 +61,14 @@ class Train_Config:
         
         self.ckpt_save_val_interval = config.get('ckpt_save_val_interval', 100)
         self.dataset_num_workers = config.get('dataset_num_workers', 4)
+        self.enable_validation = bool(config.get('enable_validation', True))
+
+        # --- Logging ---
+        logging_cfg = config.get('logging', {})
+        self.logging_backend = str(logging_cfg.get('backend', 'mlflow')).lower()
+        self.mlflow_tracking_uri = str(logging_cfg.get('tracking_uri', 'http://172.100.100.100:5000'))
+        self.mlflow_experiment = str(logging_cfg.get('experiment', 'mr-aiv'))
+        self.mlflow_log_model = bool(logging_cfg.get('log_model', False))
 
         # --- Training Phases ---
         self.phases = config.get('phases', {})

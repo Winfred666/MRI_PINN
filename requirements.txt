@@ -18,5 +18,5 @@ ipympl  # enables %matplotlib widget backend
 # PyTorch + Lightning (install torch matching your CUDA/CPU setup)
 # For CUDA-specific wheels see: https://pytorch.org/get-started/locally/
 lightning>=2.3
-tensorboard>=2.14
+mlflow>=2.14
 

@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from modules.rba_resample_trainer import Net_RBAResample
 from utils.forward_sim import advect_diffuse_forward_simulation
+from utils.mlflow_logging import log_histogram_artifact, log_image_artifact
 
 
 class ADPINN_Base(Net_RBAResample):
@@ -89,20 +90,44 @@ class ADPINN_Base(Net_RBAResample):
         if batch_idx == 0:
             self.log('val_data_loss', val_loss)
             c_vis = self.c_net.draw_concentration_slices()
-            self.logger.experiment.add_image('val_C_compare', c_vis, self.current_epoch, dataformats='WH')
+            log_image_artifact(
+                logger=self.logger,
+                image=c_vis,
+                image_key='val_C_compare',
+                step=self.current_epoch,
+            )
             rgb_img, vx, vy, vz = self.v_net.draw_velocity_volume()
-            self.logger.experiment.add_image('val_v_quiver', rgb_img, self.current_epoch, dataformats='HWC')
+            log_image_artifact(
+                logger=self.logger,
+                image=rgb_img,
+                image_key='val_v_quiver',
+                step=self.current_epoch,
+            )
 
-            self.logger.experiment.add_image('val_adv_diff_step', 
-                                             self.validate_forward_step(vx, vy, vz, t_index=0, 
-                                                                        t_jump=8), self.current_epoch, dataformats='WH')
+            log_image_artifact(
+                logger=self.logger,
+                image=self.validate_forward_step(
+                    vx,
+                    vy,
+                    vz,
+                    t_index=0,
+                    t_jump=max(1, min(8, self.ad_net.char_domain.domain_shape[3] - 1)),
+                ),
+                image_key='val_adv_diff_step',
+                step=self.current_epoch,
+            )
         
             # log velocity histogram
             flat_v = np.sqrt(vx**2 + vy**2 + vz**2).flatten()
             if np.min(flat_v) <= 0:
                 flat_v = flat_v - np.min(flat_v) + 1e-3
             flat_v = np.log(flat_v)
-            self.logger.experiment.add_histogram('val_v_hist', flat_v, self.current_epoch)
+            log_histogram_artifact(
+                logger=self.logger,
+                values=flat_v,
+                hist_key='val_v_hist',
+                step=self.current_epoch,
+            )
             
         return val_loss
 

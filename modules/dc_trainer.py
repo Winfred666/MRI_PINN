@@ -4,6 +4,7 @@ from modules.rba_resample_trainer import Net_RBAResample
 from modules.dc_net import AD_DC_Net
 from utils.forward_sim import advect_diffuse_forward_simulation
 from utils.visualize import draw_colorful_slice_image
+from utils.mlflow_logging import log_histogram_artifact, log_image_artifact
 import numpy as np
 
 class DCPINN_Base(Net_RBAResample):
@@ -89,9 +90,19 @@ class DCPINN_Base(Net_RBAResample):
             
             # 2. visualize c slices and v quiver
             c_vis = self.ad_dc_net.c_net.draw_concentration_slices()
-            self.logger.experiment.add_image('val_C_compare', c_vis, self.current_epoch, dataformats='WH')
+            log_image_artifact(
+                logger=self.logger,
+                image=c_vis,
+                image_key='val_C_compare',
+                step=self.current_epoch,
+            )
             rgb_img, vx, vy, vz = self.ad_dc_net.v_dc_net.draw_velocity_volume()
-            self.logger.experiment.add_image('val_v_quiver', rgb_img, self.current_epoch, dataformats='HWC')
+            log_image_artifact(
+                logger=self.logger,
+                image=rgb_img,
+                image_key='val_v_quiver',
+                step=self.current_epoch,
+            )
             
             # 2. Also calculate the norm of velocity field, slice at bottom of x domain to see willis ring
             v_mag = np.sqrt(vx**2 + vy**2 + vz**2).reshape(self.ad_dc_net.char_domain.domain_shape[:3])
@@ -103,18 +114,42 @@ class DCPINN_Base(Net_RBAResample):
                 slice_img_whc = draw_colorful_slice_image(v_slice, 'jet')
                 slice_images.append(slice_img_whc)
             combined_slices_img = np.concatenate(slice_images, axis=1)
-            self.logger.experiment.add_image('val_v_mag_slices', combined_slices_img, self.current_epoch, dataformats='HWC')
+            log_image_artifact(
+                logger=self.logger,
+                image=combined_slices_img,
+                image_key='val_v_mag_slices',
+                step=self.current_epoch,
+            )
             
             # 3. visualize one adv-diff step
-            self.logger.experiment.add_image('val_adv_diff_step', 
-                                             self.validate_forward_step(vx, vy, vz, t_index=0, 
-                                                                        t_jump=5), self.current_epoch, dataformats='WH')
+            log_image_artifact(
+                logger=self.logger,
+                image=self.validate_forward_step(
+                    vx,
+                    vy,
+                    vz,
+                    t_index=0,
+                    t_jump=max(1, min(5, self.ad_dc_net.char_domain.domain_shape[3] - 1)),
+                ),
+                image_key='val_adv_diff_step',
+                step=self.current_epoch,
+            )
             # 4. visualize k and p slices
             k_vis = self.ad_dc_net.v_dc_net.k_net.draw_physical_slices() # shaped (H,W,C)
-            self.logger.experiment.add_image('val_k_slices', k_vis, self.current_epoch, dataformats='HWC')
+            log_image_artifact(
+                logger=self.logger,
+                image=k_vis,
+                image_key='val_k_slices',
+                step=self.current_epoch,
+            )
 
             p_vis = self.ad_dc_net.v_dc_net.p_net.draw_physical_slices()
-            self.logger.experiment.add_image('val_p_slices', p_vis, self.current_epoch, dataformats='HWC')
+            log_image_artifact(
+                logger=self.logger,
+                image=p_vis,
+                image_key='val_p_slices',
+                step=self.current_epoch,
+            )
 
             # 5. log histogram of real mag of v , real k and real p(WARNING: all are in physical unit, filter out large amount of <=0 points for log scale)
             
@@ -123,7 +158,12 @@ class DCPINN_Base(Net_RBAResample):
 
             # if has no element left, give up logging
             if flag_v_mag.size > 0:
-                self.logger.experiment.add_histogram('val_v_hist', flag_v_mag, self.current_epoch)
+                log_histogram_artifact(
+                    logger=self.logger,
+                    values=flag_v_mag,
+                    hist_key='val_v_hist',
+                    step=self.current_epoch,
+                )
             
             flat_k = self.ad_dc_net.v_dc_net.k_net.get_physical_volume().flatten()
             flat_k = np.log(flat_k[flat_k > 1e-10])  # filter out very small values as paper visualized.
@@ -131,11 +171,21 @@ class DCPINN_Base(Net_RBAResample):
             if flat_k.size > 0:
                 if np.min(flat_k) <= 0:
                     flat_k = flat_k - np.min(flat_k) + 1e-3
-                self.logger.experiment.add_histogram('val_k_hist', flat_k, self.current_epoch)
+                log_histogram_artifact(
+                    logger=self.logger,
+                    values=flat_k,
+                    hist_key='val_k_hist',
+                    step=self.current_epoch,
+                )
             
             # do not take log for pressure, only offset to calibrate the value.
             flat_p = self.ad_dc_net.v_dc_net.p_net.get_physical_volume(min_base=0).flatten()
-            self.logger.experiment.add_histogram('val_p_hist', flat_p, self.current_epoch)
+            log_histogram_artifact(
+                logger=self.logger,
+                values=flat_p,
+                hist_key='val_p_hist',
+                step=self.current_epoch,
+            )
 
         return val_loss
 
@@ -315,8 +365,8 @@ class DCPINN_Joint(DCPINN_Base):
                  ad_dc_net: AD_DC_Net,
                  num_train_points,
                  incompressible=False,
-                 data_weight=10.0,
-                 pde_weight=1.0,
+                 data_weight=1.0,
+                 pde_weight=12.0,
                  div_weight=1e-5,
                  learning_rate=1e-5,
                  rba_learning_rate=0.1,
