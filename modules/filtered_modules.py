@@ -72,8 +72,8 @@ def create_outlier_filter_mask(
         time_mask = (X_time.cpu() == t_val).squeeze() # masked all current timestep points, shaped (N,)
         discard_points_num = 0
 
-        # first discard concentration value below 1e-1
-        low_concentration_mask = (pred_c[time_mask] < 1e-1)
+        # first discard concentration value below 1e-3
+        low_concentration_mask = (pred_c[time_mask] < 1e-3)
         discard_points_num += low_concentration_mask.sum().item()
         valid_mask[time_mask] &= ~low_concentration_mask
 

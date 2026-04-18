@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from torch.func import grad, jacrev, vmap
+from torch.utils.checkpoint import checkpoint_sequential
 
 from modules.positional_encoding import PositionalEncoding_GeoTime
 from utils.visualize import visualize_prediction_vs_groundtruth
@@ -13,10 +14,20 @@ from utils.visualize import visualize_prediction_vs_groundtruth
 
 
 class MLP(nn.Module):
-    def __init__(self, input_dim, output_dim, hidden_layers, hidden_features):
+    def __init__(
+        self,
+        input_dim,
+        output_dim,
+        hidden_layers,
+        hidden_features,
+        use_activation_checkpointing=True,
+        checkpoint_segments=4,
+    ):
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
+        self.use_activation_checkpointing = bool(use_activation_checkpointing)
+        self.checkpoint_segments = max(1, int(checkpoint_segments))
         layers = [nn.Linear(input_dim, hidden_features), nn.SiLU()]
         for _ in range(hidden_layers - 1):
             layers.append(nn.Linear(hidden_features, hidden_features))
@@ -32,6 +43,11 @@ class MLP(nn.Module):
                 nn.init.zeros_(m.bias)
 
     def forward(self, x):
+        if self.use_activation_checkpointing and self.training and torch.is_grad_enabled():
+            num_layers = len(self.net)
+            if num_layers > 2:
+                num_segments = min(self.checkpoint_segments, num_layers)
+                return checkpoint_sequential(self.net, num_segments, x, use_reentrant=False)
         return self.net(x)
 
 
@@ -84,14 +100,40 @@ class C_Net(nn.Module):
         self.sigma_0 = 0.01  # minimum noise level
 
         # --- Keep validation attributes ---
-        self.val_slice_z = [char_domain.domain_shape[2] // 2 - 6, char_domain.domain_shape[2] // 2, char_domain.domain_shape[2] // 2 + 6]
+        self.val_slice_z = self._build_safe_slice_indices(
+            total_size=char_domain.domain_shape[2],
+            requested=[char_domain.domain_shape[2] // 2 - 6, char_domain.domain_shape[2] // 2, char_domain.domain_shape[2] // 2 + 6],
+            fallback_count=3,
+        )
         base_t = char_domain.domain_shape[3] // 4 * 2
-        self.val_slice_t = [base_t - 6, base_t - 3, base_t, base_t + 3]
+        self.val_slice_t = self._build_safe_slice_indices(
+            total_size=char_domain.domain_shape[3],
+            requested=[base_t - 6, base_t - 3, base_t, base_t + 3],
+            fallback_count=4,
+        )
         self.val_slice_4d = char_domain.get_characteristic_geotimedomain(slice_zindex=self.val_slice_z,
                                                                        slice_tindex=self.val_slice_t) # (6 slice * N,4)
         Z, T = np.meshgrid(self.val_slice_z, self.val_slice_t, indexing='ij')
         self.gt_data = data / C_star # data in [0,100] in characteristic domain, only for revalidation.
         self.val_slice_gt_c = self.gt_data[:, :, Z, T]
+
+    @staticmethod
+    def _build_safe_slice_indices(total_size, requested, fallback_count):
+        total_size = int(total_size)
+        if total_size <= 0:
+            return [0]
+
+        if total_size <= fallback_count:
+            return list(range(total_size))
+
+        safe = []
+        for idx in requested:
+            idx_i = int(np.clip(idx, 0, total_size - 1))
+            if idx_i not in safe:
+                safe.append(idx_i)
+        if len(safe) == 0:
+            safe = list(np.linspace(0, total_size - 1, num=min(fallback_count, total_size), dtype=int))
+        return safe
 
     def forward(self, X_train):
         # Explicitly define the forward pass logic for concentration

@@ -154,16 +154,22 @@ class V_DC_Net(nn.Module):
         self.char_domain = char_domain
         self.val_volume_3d = char_domain.get_characteristic_geodomain().to(torch.float32)
 
-    def forward(self, X):
-        # this forward pass is called within a torch.no_grad() block.
+    def forward(self, X, create_graph=True):
         with torch.enable_grad():
             # X: (N,3) -> use spatial part only
             X.requires_grad_(True)
-            # Temporarily enable gradient tracking to compute grad_p, even if
             p = self.p_net(X)  # (N,1)
-            grad_p = torch.autograd.grad(p, X, grad_outputs=torch.ones_like(p),
-                                         create_graph=True)[0]  # (N,3)
-        k = self.k_net(X)
+            grad_p = torch.autograd.grad(
+                p,
+                X,
+                grad_outputs=torch.ones_like(p),
+                create_graph=create_graph,
+            )[0]  # (N,3)
+        if create_graph:
+            k = self.k_net(X)
+        else:
+            with torch.no_grad():
+                k = self.k_net(X)
         v = -grad_p * k
         vx, vy, vz = v[:, 0:1], v[:, 1:2], v[:, 2:3]
 
@@ -184,7 +190,7 @@ class V_DC_Net(nn.Module):
         return div_v
     
     # Get vx,vy,vz in unit of physical velocity
-    def draw_velocity_volume(self):
+    def draw_velocity_volume(self, chunk_size=32768):
         """
         mask: (nx, ny, nz) using that in char_domain
         pixdim: voxel spacing (3,) for physical quiver scaling
@@ -192,14 +198,26 @@ class V_DC_Net(nn.Module):
         mask_np = self.char_domain.mask
         data_shape = self.char_domain.domain_shape[:3]
         nx, ny, nz = data_shape[0], data_shape[1], data_shape[2]
-        with torch.no_grad():
-            grid = self.val_volume_3d.to(next(self.p_net.parameters()).device)
-            vx, vy, vz = self.forward(grid)
-            vx = vx.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[0] * mask_np
-            vy = vy.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[1] * mask_np
-            vz = vz.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[2] * mask_np
-            rgb_img = fixed_quiver_image(vx, vy, vz, self.char_domain.pixdim)
-            return rgb_img, vx, vy, vz
+        device = next(self.p_net.parameters()).device
+        grid = self.val_volume_3d.to(device)
+        chunk_size = max(1, int(chunk_size))
+        vx_parts = []
+        vy_parts = []
+        vz_parts = []
+        for start in range(0, grid.shape[0], chunk_size):
+            chunk = grid[start:start + chunk_size]
+            vx_chunk, vy_chunk, vz_chunk = self.forward(chunk, create_graph=False)
+            vx_parts.append(vx_chunk.detach().cpu())
+            vy_parts.append(vy_chunk.detach().cpu())
+            vz_parts.append(vz_chunk.detach().cpu())
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
+        vx = torch.cat(vx_parts, dim=0).numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[0] * mask_np
+        vy = torch.cat(vy_parts, dim=0).numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[1] * mask_np
+        vz = torch.cat(vz_parts, dim=0).numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[2] * mask_np
+        rgb_img = fixed_quiver_image(vx, vy, vz, self.char_domain.pixdim)
+        return rgb_img, vx, vy, vz
 
 
 class AD_DC_Net(nn.Module):

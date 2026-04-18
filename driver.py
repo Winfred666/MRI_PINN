@@ -1,5 +1,6 @@
 import argparse
 import os
+import gc
 import numpy as np
 import torch
 
@@ -28,7 +29,11 @@ def main(config_path):
     print(f"Detected Model Type: {cfg.model_type.upper()}")
 
     # --- 2. Data Preparation (Common) ---
-    data, mask, pixdim, x, y, z, t = load_dcemri_data(cfg.dcemrinp_data_path)
+    data, mask, pixdim, x, y, z, t = load_dcemri_data(
+        cfg.dcemrinp_data_path,
+        brain_mask_path=cfg.brain_mask_path,
+        frame_numbers=cfg.frame_numbers,
+    )
     char_domain = CharacteristicDomain(data.shape, mask, t, pixdim, cfg.reload_dataloaders_every_n_epochs, device)
     print(f"L_star: {char_domain.L_star}, T_star: {char_domain.T_star}")
 
@@ -63,7 +68,13 @@ def main(config_path):
         from utils.permeability_guess import estimate_initial_permeability
         from modules.data_module import PermeabilityDataModule
 
-        _, smooth_permeability = estimate_initial_permeability(data, t, ser_threshold=12.0, time_threshold_min=t[4])
+        threshold_index = min(4, len(t) - 1)
+        _, smooth_permeability = estimate_initial_permeability(
+            data,
+            t,
+            ser_threshold=12.0,
+            time_threshold_min=t[threshold_index],
+        )
         print(f"Initial permeability max and min: {smooth_permeability.max()}, {smooth_permeability.min()}")
         k_dataset = PermeabilityDataModule(smooth_permeability, char_domain,
                                            batch_size=int(mask.sum()),
@@ -74,7 +85,7 @@ def main(config_path):
 
         def trainer_getter(train_phase, ad_dc_net, phase_cfg={}):
             nonlocal c_dataset # Allow modification of the outer scope c_dataset
-            incompressible = phase_cfg.get("incompressible", False)
+            incompressible = phase_cfg.get("incompressible", True)
             enable_td_weight = phase_cfg.get("enable_td_weight", True)
             validate_v_slices = phase_cfg.get("validate_v_slices", [43, 45, 49, 50])
             if train_phase == CNet_Init.train_phase: return CNet_Init(ad_dc_net.c_net, c_dataset.num_train_points), c_dataset
@@ -147,6 +158,10 @@ def main(config_path):
     # --- 6. Post-Processing and Saving Results ---
     print("Training complete. Extracting and saving results.")
     pinn_model.to(device)
+    pinn_model.eval()
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     
     # Extract learned parameters
     if cfg.model_type == 'dc':
@@ -158,11 +173,12 @@ def main(config_path):
         
     print(f"Learned diffusivity D: {D_learned}")
 
-    # Convert velocity to units (cell/min)
-    vx = vx  / char_domain.pixdim[0]
-    vy = vy  / char_domain.pixdim[1]
-    vz = vz  / char_domain.pixdim[2]
-    print(f"Velocity ranges (vx, vy, vz): ({vx.min():.3f}, {vx.max():.3f}), ({vy.min():.3f}, {vy.max():.3f}), ({vz.min():.3f}, {vz.max():.3f})")
+    print(
+        f"Velocity ranges mm/min (vx, vy, vz): "
+        f"({vx.min():.3f}, {vx.max():.3f}), "
+        f"({vy.min():.3f}, {vy.max():.3f}), "
+        f"({vz.min():.3f}, {vz.max():.3f})"
+    )
 
     # Save velocity field for external analysis (e.g., MATLAB)
     save_path = f"{cfg.result_folder}/predict_velocity.mat"

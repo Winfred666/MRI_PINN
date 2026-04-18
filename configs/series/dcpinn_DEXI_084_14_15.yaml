@@ -1,0 +1,85 @@
+# Auto-generated DCPINN two-frame config for DEXI_084.
+# Each run consumes exactly one adjacent pair of frames from data/dce_mri/DEXI_084/preprocess_DCE.
+
+do_training: true
+continue_training: false
+
+# NIfTI template input + explicit two-frame selection
+dcemrinp_data_path: "data/dce_mri/DEXI_084/preprocess_DCE/pdce2base_{04d}.nii"
+brain_mask_path: "data/dce_mri/DEXI_084/brain_mask.nii.gz"
+frame_numbers: [14, 15]
+
+# --- Model Architecture ---
+neuron_num: 150
+c_neuron_num: 256
+hid_layer_num: 5
+
+# --- Feature Engineering ---
+positional_encoding:
+  use: false
+  freq_nums: [20, 20, 20, 0]
+  freq_scale: 1.0
+
+cuda_visible_devices: [0]
+
+# --- Physics & PDE Configuration ---
+use_DTI: false
+use_learnable_D: false
+viscosity: 6.95e-4
+
+# --- Logging ---
+logging:
+  backend: mlflow
+  tracking_uri: "http://172.100.100.100:5000"
+  experiment: "mr-aiv"
+  log_model: false
+
+# --- RBAR (Residual-Based Attention Resampling) ---
+enable_rbar: true
+
+# --- Dataloader & Checkpointing Settings ---
+reload_dataloaders_every_n_epochs: 100
+ckpt_save_val_interval: 200
+dataset_num_workers: 0
+enable_validation: false
+
+# --- Training Phases ---
+# Batch sizes are dcpinn_denoise_KX78_H100.yaml divided by 8.
+phases:
+  init_c_data:
+    learning_rate: 0.0005
+    max_epochs: 3000
+    batch_size: 75000
+
+  init_c_denoise_data:
+    learning_rate: 0.002
+    max_epochs: 6000
+    batch_size: 87500
+
+  init_k_data:
+    learning_rate: 0.002
+    max_epochs: 2000
+    batch_size: 87500
+
+  init_p_data:
+    learning_rate: 0.002
+    max_epochs: 1000
+    batch_size: 87500
+
+  ad_pde_p:
+    incompressible: true
+    learning_rate: 0.0001
+    max_epochs: 4000
+    batch_size: 85000
+
+  ad_pde_p_k:
+    incompressible: true
+    learning_rate: 0.00005
+    max_epochs: 2000
+    batch_size: 85000
+
+  joint_ad_pde+joint_data:
+    incompressible: true
+    learning_rate: 0.0001
+    max_epochs: 8000
+    batch_size: 70000
