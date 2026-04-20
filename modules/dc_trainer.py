@@ -396,7 +396,7 @@ class DCPINN_Joint(DCPINN_Base):
                  rba_memory=0.999,
                  enable_rbar=True,
                  enable_td_weight=True,
-                 validate_v_slices=[43, 45, 49, 50]):
+                 validate_v_slices=[66, 68, 70, 71]):
         rba_list = [("joint_data", data_weight), ("joint_ad_pde", pde_weight)]
         self.incompressible = incompressible
         if incompressible:

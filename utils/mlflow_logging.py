@@ -9,26 +9,77 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+_PHASE_KEY_ALIASES = {
+    "init_c_data": "cinit",
+    "init_c_denoise_data": "cdenoise",
+    "ad_pde_p": "ppde",
+    "ad_pde_p_k": "pk",
+    "joint_ad_pde+joint_data": "joint",
+    "joint_ad_pde_joint_data": "joint",
+}
+
+_IMAGE_KEY_ALIASES = {
+    "val_C_compare": "c",
+    "val_c_compare": "c",
+    "val_v_quiver": "vq",
+    "val_v_mag_slices": "vmag",
+    "val_adv_diff_step": "adv",
+    "val_k_slices": "k",
+    "val_p_slices": "p",
+    "val_v_hist": "vh",
+    "val_k_hist": "kh",
+    "val_p_hist": "ph",
+}
+
+
 def _sanitize_key_token(value: Any) -> str:
-    token = str(value).strip().strip("/").replace("/", "-")
+    token = str(value).strip().strip("/")
     if not token:
         return ""
-    token = re.sub(r"[^0-9A-Za-z_.\-]+", "_", token)
-    return token.strip("._-")
+    token = token.replace("/", "-").replace("_", "-").replace("+", "-").lower()
+    token = re.sub(r"[^0-9a-z.\-]+", "-", token)
+    token = re.sub(r"-{2,}", "-", token)
+    return token.strip(".-")
+
+
+def _shorten_token(token: str, max_len: int = 24) -> str:
+    token_str = _sanitize_key_token(token)
+    if not token_str:
+        return ""
+    return token_str[:max_len].rstrip(".-")
+
+
+def compact_image_series_key(active_phase: Any, image_key: Any) -> str:
+    phase_raw = str(active_phase or "").strip()
+    key_raw = str(image_key or "").strip()
+
+    phase_token = _PHASE_KEY_ALIASES.get(phase_raw)
+    if phase_token is None:
+        phase_token = _PHASE_KEY_ALIASES.get(_sanitize_key_token(phase_raw), "")
+    phase_token = _shorten_token(phase_token or phase_raw, max_len=12)
+
+    key_token = _IMAGE_KEY_ALIASES.get(key_raw)
+    if key_token is None:
+        key_token = _IMAGE_KEY_ALIASES.get(_sanitize_key_token(key_raw))
+    key_token = _shorten_token(key_token or key_raw, max_len=12)
+
+    parts = [part for part in (phase_token, key_token) if part]
+    if not parts:
+        raise ValueError("image_key must be a non-empty string for comparable image-series logging.")
+    return "-".join(parts)
 
 
 def _phase_scope(logger: Any) -> str:
-    return _sanitize_key_token(getattr(logger, "active_phase", "") or "")
+    return _shorten_token(
+        _PHASE_KEY_ALIASES.get(getattr(logger, "active_phase", "") or "", "")
+        or (getattr(logger, "active_phase", "") or ""),
+        max_len=12,
+    )
 
 
 def _scoped_key(logger: Any, key: str, prefix: str) -> str:
-    key_str = _sanitize_key_token(key)
-    if not key_str:
-        return ""
-    prefix_str = _sanitize_key_token(prefix)
-    phase_scope = _phase_scope(logger)
-    scoped_parts = [part for part in (prefix_str, phase_scope, key_str) if part]
-    return "-".join(scoped_parts)
+    del prefix
+    return compact_image_series_key(getattr(logger, "active_phase", "") or "", key)
 
 
 def validation_epoch_step(module: Any) -> int:

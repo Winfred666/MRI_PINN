@@ -46,11 +46,11 @@ phases:
   ad_pde_p_k:
     incompressible: true
     learning_rate: 0.00005
-    max_epochs: 100
+    max_epochs: 500
     batch_size: 85000
 
   joint_ad_pde+joint_data:
     incompressible: true
-    learning_rate: 1.0e-8
+    learning_rate: 1.0e-5
     max_epochs: 1
     batch_size: 70000
