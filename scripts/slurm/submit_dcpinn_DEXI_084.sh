@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-dependency_args=()
 if [[ -n "${SBATCH_DEPENDENCY:-}" ]]; then
-  dependency_args=(--dependency="${SBATCH_DEPENDENCY}")
+  sbatch --dependency="${SBATCH_DEPENDENCY}" scripts/slurm/dcpinn_DEXI_084_pack1.sbatch
+  sbatch --dependency="${SBATCH_DEPENDENCY}" scripts/slurm/dcpinn_DEXI_084_pack2.sbatch
+else
+  sbatch scripts/slurm/dcpinn_DEXI_084_pack1.sbatch
+  sbatch scripts/slurm/dcpinn_DEXI_084_pack2.sbatch
 fi
-
-sbatch "${dependency_args[@]}" scripts/slurm/dcpinn_DEXI_084_pack1.sbatch
-sbatch "${dependency_args[@]}" scripts/slurm/dcpinn_DEXI_084_pack2.sbatch
