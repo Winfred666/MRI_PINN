@@ -204,7 +204,7 @@ def advect_diffuse_forward_simulation(
         
         simulation_frames = [C_current.cpu().numpy()]
 
-        print(f"Running PyTorch simulation on {device} for {total_time}s in {num_steps} steps (dt={dt:.3f}s)")
+        print(f"Running PyTorch simulation on {device} for {total_time:.3f} min in {num_steps} steps (dt={dt:.3f} min)")
         for i in range(num_steps):
             C_advected = advection_step_pytorch(C_current, vx_vox_dt, vy_vox_dt, vz_vox_dt, dt=1.0)
             C_diffused = diffusion_step_pytorch(C_advected, D_t, dt, dx, dy, dz)

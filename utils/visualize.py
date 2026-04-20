@@ -1,12 +1,106 @@
 import numpy as np
 
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
 import ipywidgets as widgets
 from ipywidgets import interact
 from IPython.display import display
+from matplotlib.colors import Colormap
+
+
+def build_power_alpha_colormap(
+    base_cmap: str | Colormap = "jet",
+    gamma: float = 2.5,
+) -> Colormap:
+    """Build the notebook-style PowerNorm colormap with an alpha ramp."""
+    cmap_obj = plt.get_cmap(base_cmap) if isinstance(base_cmap, str) else base_cmap
+    samples = np.linspace(0.0, 1.0, 256)
+    warped = mcolors.PowerNorm(gamma=gamma, vmin=0.0, vmax=1.0)(samples)
+    rgba = cmap_obj(warped)
+    rgba[:, 3] = warped
+    return mcolors.ListedColormap(rgba, name=f"{cmap_obj.name}_power{gamma}_alpha")
+
+
+DEFAULT_3D_QUIVER_CMAP = build_power_alpha_colormap()
+
+
+def _build_grid_from_pixdim(
+    shape: tuple[int, int, int],
+    pixdim: tuple[float, float, float],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    x_coords = np.linspace(0.0, pixdim[0] * shape[0], shape[0], dtype=np.float64)
+    y_coords = np.linspace(0.0, pixdim[1] * shape[1], shape[1], dtype=np.float64)
+    z_coords = np.linspace(0.0, pixdim[2] * shape[2], shape[2], dtype=np.float64)
+    return np.meshgrid(x_coords, y_coords, z_coords, indexing="ij")
+
+
+def _grid_axis_bounds(
+    X: np.ndarray,
+    Y: np.ndarray,
+    Z: np.ndarray,
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float]]:
+    return (
+        (float(np.min(X)), float(np.max(X))),
+        (float(np.min(Y)), float(np.max(Y))),
+        (float(np.min(Z)), float(np.max(Z))),
+    )
+
+
+def _apply_axis_limits_with_zoom(
+    ax: plt.Axes,
+    *,
+    x_bounds: tuple[float, float],
+    y_bounds: tuple[float, float],
+    z_bounds: tuple[float, float],
+    zoom: float,
+) -> None:
+    if zoom <= 0.0:
+        raise ValueError(f"zoom must be > 0, got {zoom}")
+
+    def _zoomed_bounds(bounds: tuple[float, float]) -> tuple[float, float]:
+        low, high = bounds
+        if high < low:
+            low, high = high, low
+        if zoom <= 1.0:
+            return (low, high)
+        center = 0.5 * (low + high)
+        half_span = 0.5 * (high - low) / zoom
+        return (center - half_span, center + half_span)
+
+    ax.set_xlim(*_zoomed_bounds(x_bounds))
+    ax.set_ylim(*_zoomed_bounds(y_bounds))
+    ax.set_zlim(*_zoomed_bounds(z_bounds))
+
+
+def _infer_quiver_mag_max(
+    X: np.ndarray,
+) -> float:
+    """Infer quiver color scale directly from the X-axis physical spacing."""
+    if X.shape[0] < 2:
+        raise ValueError(
+            "Cannot infer quiver magnitude range when X has fewer than 2 slices along axis 0."
+        )
+    dx = float(X[1, 0, 0] - X[0, 0, 0])
+    if not np.isfinite(dx) or dx == 0.0:
+        raise ValueError(f"Cannot infer quiver magnitude range from invalid X spacing: {dx}")
+    return 3.0 * abs(dx)
 
 # 1. visualize 3D velocity field quiver with interactive widget or window
-def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='RdYlBu_r', normalize_vectors=False, ax=None, show=True, return_mappable=False):
+def draw_3d_quiver(
+    X,
+    Y,
+    Z,
+    vx,
+    vy,
+    vz,
+    stride=2,
+    length_scale=1.0,
+    cmap=DEFAULT_3D_QUIVER_CMAP,
+    normalize_vectors=False,
+    ax=None,
+    show=True,
+    return_mappable=False,
+):
     """
     Colored 3D quiver: arrow length + color encode speed magnitude.
     If ax is provided, update the existing axes instead of creating a new figure.
@@ -14,42 +108,39 @@ def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='RdYlB
       show: if True and a new figure is created (ax is None), call plt.show().
       return_mappable: if True, also return a ScalarMappable for creating a colorbar (independent of artist alpha).
     """
-    # Subsample
+    stride = max(1, int(stride))
     Xs = X[::stride, ::stride, ::stride]
     Ys = Y[::stride, ::stride, ::stride]
     Zs = Z[::stride, ::stride, ::stride]
-    U  = vx[::stride, ::stride, ::stride]
-    V  = vy[::stride, ::stride, ::stride]
-    W  = vz[::stride, ::stride, ::stride]
+    U = vx[::stride, ::stride, ::stride]
+    V = vy[::stride, ::stride, ::stride]
+    W = vz[::stride, ::stride, ::stride]
 
-    # Flatten for quiver
-    Xf = Xs.ravel(); Yf = Ys.ravel(); Zf = Zs.ravel()
-    Uf = U.ravel();  Vf = V.ravel();  Wf = W.ravel()
+    Xf = Xs.ravel()
+    Yf = Ys.ravel()
+    Zf = Zs.ravel()
+    Uf = U.ravel()
+    Vf = V.ravel()
+    Wf = W.ravel()
 
     mag = np.sqrt(Uf**2 + Vf**2 + Wf**2)
-    mag_min, mag_max = mag.min() if mag.size else 0.0, mag.max() if mag.size else 1.0
-    if mag_max <= mag_min:
-        mag_max = mag_min + 1.0
-    mag_norm = (mag - mag_min) / (mag_max - mag_min)  # 0..1 for colormap
+    cmap_obj = plt.get_cmap(cmap) if isinstance(cmap, str) else cmap
+    mag_max = max(float(_infer_quiver_mag_max(X)), 1e-12)
+    norm = mcolors.Normalize(vmin=0.0, vmax=mag_max, clip=True)
+    colors = cmap_obj(norm(mag))
 
     if normalize_vectors:
-        nonzero = mag > 0
+        nonzero = mag > 0.0
+        Uf = Uf.copy()
+        Vf = Vf.copy()
+        Wf = Wf.copy()
         Uf[nonzero] /= mag[nonzero]
         Vf[nonzero] /= mag[nonzero]
         Wf[nonzero] /= mag[nonzero]
-    else:
-        max_m = mag.max() if mag.size else 1.0
-        if max_m > 0:
-            Uf /= max_m
-            Vf /= max_m
-            Wf /= max_m
 
-    # Apply global length scale
-    Uf *= length_scale
-    Vf *= length_scale
-    Wf *= length_scale
-
-    colors = plt.get_cmap(cmap)(mag_norm)
+    Uf *= float(length_scale)
+    Vf *= float(length_scale)
+    Wf *= float(length_scale)
 
     created_new_ax = False
     if ax is None:
@@ -63,17 +154,15 @@ def draw_3d_quiver(X, Y, Z, vx, vy, vz, stride=3, length_scale=0.25, cmap='RdYlB
     # Quiver (colored arrows)
     ax.quiver(Xf, Yf, Zf, Uf, Vf, Wf, colors=colors, length=1.0, normalize=False)
 
-    ax.set_xlabel('X')
-    ax.set_ylabel('Y')
-    ax.set_zlabel('Z')
-    ax.set_title('Velocity Field (colored by |v|)')
-    ax.set_box_aspect([1,1,1])
+    ax.set_xlabel("X (mm)")
+    ax.set_ylabel("Y (mm)")
+    ax.set_zlabel("Z (mm)")
+    ax.set_title("Velocity field (mm/min)")
+    ax.set_box_aspect([1, 1, 1])
     plt.tight_layout()
 
-    # Independent mappable for colorbar so alpha is not affected
     if return_mappable:
-        norm = plt.Normalize(vmin=mag_min, vmax=mag_max)
-        mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+        mappable = plt.cm.ScalarMappable(norm=norm, cmap=cmap_obj)
         mappable.set_array(mag)
     else:
         mappable = None
@@ -409,53 +498,60 @@ def visualize_prediction_vs_groundtruth(pred_img, gt_img, vmin=0, vmax=1):
     return stacked
 
 # Add a fixed-view quiver exporter returning an RGB array
-def fixed_quiver_image(vx, vy, vz, pixdim, stride=3, length_scale=0.8, elev=-72.76, azim=-10.87,
-                       cmap='RdYlBu_r', normalize_vectors=False, figsize=(7, 6), dpi=100,
-                       add_colorbar=True, close_fig=True, zoom=1.25, label="|v| magnitude"):
+def fixed_quiver_image(
+    vx,
+    vy,
+    vz,
+    pixdim,
+    stride=2,
+    length_scale=1.0,
+    elev=-72.76,
+    azim=-10.87,
+    cmap=DEFAULT_3D_QUIVER_CMAP,
+    normalize_vectors=False,
+    figsize=(8, 6),
+    dpi=100,
+    add_colorbar=True,
+    close_fig=True,
+    zoom=1.25,
+    label="Velocity magnitude (mm/min)",
+    title="Velocity field (mm/min)",
+):
     """
-    Render a 3D quiver plot at a fixed view and return it as an RGB (H,W,3) uint8 array.
-    Uses separate ScalarMappable so colorbar always shows colors.
+    Render a fixed-view 3D quiver plot and return it as an RGB (H,W,3) uint8 array.
     """
-    X, Y, Z = np.meshgrid(np.arange(vx.shape[0]), np.arange(vx.shape[1]), np.arange(vx.shape[2]), indexing='ij')
-    X = X * pixdim[0]; Y = Y * pixdim[1]; Z = Z * pixdim[2]
-
+    pixdim_tuple = tuple(float(v) for v in pixdim)
+    X, Y, Z = _build_grid_from_pixdim(vx.shape, pixdim_tuple)
+    x_bounds, y_bounds, z_bounds = _grid_axis_bounds(X, Y, Z)
     fig = plt.figure(figsize=figsize, dpi=dpi)
-    ax = fig.add_subplot(111, projection='3d')
+    ax = fig.add_subplot(111, projection="3d")
 
-    fig_ret = draw_3d_quiver(X, Y, Z, vx, vy, vz,
-                   stride=stride,
-                   length_scale=length_scale,
-                   cmap=cmap,
-                   normalize_vectors=normalize_vectors,
-                   ax=ax,
-                   show=False,
-                   return_mappable=True)
+    fig_ret = draw_3d_quiver(
+        X,
+        Y,
+        Z,
+        vx,
+        vy,
+        vz,
+        stride=stride,
+        length_scale=length_scale,
+        cmap=cmap,
+        normalize_vectors=normalize_vectors,
+        ax=ax,
+        show=False,
+        return_mappable=True,
+    )
     _, _, mappable = fig_ret
 
     ax.view_init(elev=elev, azim=azim)
-
-    # Simulated zoom via axis limits
-    if zoom > 1.0:
-        # Determine center in voxel indices
-        cx = (vx.shape[0]-1)/2.0
-        cy = (vy.shape[1]-1)/2.0 if vx.ndim == 3 else (vx.shape[1]-1)/2.0
-        cz = (vz.shape[2]-1)/2.0
-        # Original physical spans
-        x_full = (vx.shape[0]-1)*pixdim[0]
-        y_full = (vy.shape[1]-1)*pixdim[1]
-        z_full = (vz.shape[2]-1)*pixdim[2]
-        # Enforce a minimum fraction of span
-        frac = 1.0/zoom
-        x_half = 0.5 * x_full * frac
-        y_half = 0.5 * y_full * frac
-        z_half = 0.5 * z_full * frac
-        cxp = cx * pixdim[0]
-        cyp = cy * pixdim[1]
-        czp = cz * pixdim[2]
-        ax.set_xlim(max(0, cxp - x_half), min(x_full, cxp + x_half))
-        ax.set_ylim(max(0, cyp - y_half), min(y_full, cyp + y_half))
-        ax.set_zlim(max(0, czp - z_half), min(z_full, czp + z_half))
-
+    ax.set_title(title)
+    _apply_axis_limits_with_zoom(
+        ax,
+        x_bounds=x_bounds,
+        y_bounds=y_bounds,
+        z_bounds=z_bounds,
+        zoom=zoom,
+    )
 
     if add_colorbar and mappable is not None:
         cb = fig.colorbar(mappable, ax=ax, shrink=0.65, pad=0.1)
@@ -479,7 +575,7 @@ def fixed_quiver_image(vx, vy, vz, pixdim, stride=3, length_scale=0.8, elev=-72.
         import io
         from PIL import Image
         bio = io.BytesIO()
-        fig.savefig(bio, format='png', dpi=fig.dpi, bbox_inches='tight')
+        fig.savefig(bio, format="png", dpi=fig.dpi, bbox_inches="tight")
         bio.seek(0)
         rgb = np.array(Image.open(bio).convert("RGB"))
 

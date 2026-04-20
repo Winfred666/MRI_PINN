@@ -5,23 +5,66 @@ from pathlib import Path
 import nibabel as nib
 import numpy as np
 import scipy.io as sio
+import torch
 
 
 _DCE_FILENAME_RE = re.compile(r"^(?:p)?dce2base_(\d+)\.nii(?:\.gz)?$")
 _DCE_TEMPLATE_RE = re.compile(r"\{(?::)?0?(\d+)d\}")
 
 
-def _load_dcemri_npz(path: str):
-    downsample_data = np.load(path)
-    data = downsample_data["data"]
-    mask = downsample_data["mask"]
-    pixdim = downsample_data["pixdim"]
-    x, y, z, t = (
-        downsample_data["x"],
-        downsample_data["y"],
-        downsample_data["z"],
-        downsample_data["t"],
-    )
+def _unwrap_pt_samples(samples):
+    if isinstance(samples, dict):
+        return samples
+    if isinstance(samples, (list, tuple)):
+        if len(samples) == 0:
+            raise ValueError("PT payload field 'samples' must not be empty.")
+        sample = samples[0]
+        if not isinstance(sample, dict):
+            raise ValueError(
+                "PT payload field 'samples' must contain dict entries when provided as a list/tuple."
+            )
+        return sample
+    raise ValueError("PT payload field 'samples' must be a dict or a non-empty list/tuple of dicts.")
+
+
+def load_dce_mri_pt(path: str):
+    pt_data = torch.load(path, map_location="cpu")
+    if not isinstance(pt_data, dict):
+        raise ValueError(f"Expected PT payload to be a dict, got {type(pt_data)} from {path}")
+    if "samples" not in pt_data:
+        raise KeyError(f"PT payload is missing required key 'samples': {path}")
+    if "dx" not in pt_data:
+        raise KeyError(f"PT payload is missing required key 'dx': {path}")
+
+    sample = _unwrap_pt_samples(pt_data["samples"])
+    if "x" not in sample:
+        raise KeyError(f"PT payload sample is missing required key 'x': {path}")
+
+    dcemri = sample["x"]
+    if isinstance(dcemri, torch.Tensor):
+        dcemri = dcemri.detach().cpu().numpy()
+    dcemri = np.asarray(dcemri, dtype=np.float32)
+    if dcemri.ndim != 4:
+        raise ValueError(f"Expected PT DCE sample 'x' to have shape (T, D, H, W), got {dcemri.shape}")
+
+    nt, nx, ny, nz = dcemri.shape
+    data = np.transpose(dcemri, (1, 2, 3, 0))  # (nx, ny, nz, nt)
+
+    pixdim = np.asarray(pt_data["dx"], dtype=np.float32).reshape(-1)
+    if pixdim.size == 1:
+        pixdim = np.repeat(pixdim[0], 3)
+    if pixdim.size != 3:
+        raise ValueError(f"Expected PT payload 'dx' to contain 3 voxel spacings, got {tuple(pixdim)}")
+
+    mask = np.any(data != 0, axis=-1)
+    if not np.any(mask):
+        mask = np.ones(data.shape[:3], dtype=bool)
+
+    x = np.arange(nx, dtype=np.float32) * pixdim[0]
+    y = np.arange(ny, dtype=np.float32) * pixdim[1]
+    z = np.arange(nz, dtype=np.float32) * pixdim[2]
+    t = np.arange(nt, dtype=np.float32) * 1.0
+
     return data, mask, pixdim, x, y, z, t
 
 
@@ -199,8 +242,15 @@ def load_dcemri_data(path, brain_mask_path=None, frame_numbers=None):
         data, mask, pixdim, x, y, z, t = _load_dcemri_nifti_template(path_str, frame_numbers=frame_numbers)
         source_desc = "nifti_template"
     elif os.path.isfile(path_str):
-        data, mask, pixdim, x, y, z, t = _load_dcemri_npz(path_str)
-        source_desc = "npz"
+        suffix = Path(path_str).suffix.lower()
+        if suffix == ".pt":
+            data, mask, pixdim, x, y, z, t = load_dce_mri_pt(path_str)
+            source_desc = "pt"
+        else:
+            raise ValueError(
+                f"Unsupported DCE file format '{suffix}' for path: {path}. "
+                "Use .pt samples or NIfTI directory/template inputs."
+            )
     else:
         raise FileNotFoundError(f"DCE input path not found: {path}")
 

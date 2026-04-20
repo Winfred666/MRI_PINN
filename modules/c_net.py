@@ -65,6 +65,7 @@ class C_Net(nn.Module):
         self.c_layers = c_layers
         self.positional_encoding = positional_encoding
         self.char_domain = char_domain
+        self.C_star = float(np.asarray(C_star).reshape(-1)[0])
 
         c_input_dim = 4
         if positional_encoding:
@@ -114,7 +115,7 @@ class C_Net(nn.Module):
         self.val_slice_4d = char_domain.get_characteristic_geotimedomain(slice_zindex=self.val_slice_z,
                                                                        slice_tindex=self.val_slice_t) # (6 slice * N,4)
         Z, T = np.meshgrid(self.val_slice_z, self.val_slice_t, indexing='ij')
-        self.gt_data = data / C_star # data in [0,100] in characteristic domain, only for revalidation.
+        self.gt_data = data / self.C_star # data in characteristic domain, only for revalidation.
         self.val_slice_gt_c = self.gt_data[:, :, Z, T]
 
     @staticmethod
@@ -180,10 +181,11 @@ class C_Net(nn.Module):
             
             vol_disp_all = self(val_coords).cpu().numpy().reshape(
                 self.char_domain.domain_shape[0], self.char_domain.domain_shape[1], len(self.val_slice_z), len(self.val_slice_t))
+            vol_disp_all = vol_disp_all * self.C_star
             c_vis_list = []
             for i in range(len(self.val_slice_z)):
                 for j in range(len(self.val_slice_t)):
-                    slice_gt_c = self.val_slice_gt_c[:, :, i, j]
+                    slice_gt_c = self.val_slice_gt_c[:, :, i, j] * self.C_star
                     vol_disp = vol_disp_all[:, :, i, j]
                     vol_disp *= self.char_domain.mask[:, :, self.val_slice_z[i]]
                     c_vis_list.append(visualize_prediction_vs_groundtruth(vol_disp, slice_gt_c))

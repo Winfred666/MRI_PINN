@@ -2,7 +2,7 @@ from modules.c_net import C_Net, MLP
 from modules.rba_resample_trainer import Net_RBAResample
 import torch
 import numpy as np
-from utils.mlflow_logging import log_image_artifact
+from utils.mlflow_logging import log_image_artifact, should_log_validation_artifacts, validation_epoch_step
 
 class CNet_Init(Net_RBAResample):
     train_phase = "init_c_data"
@@ -43,12 +43,14 @@ class CNet_Init(Net_RBAResample):
 
         if batch_idx == 0:
             self.log('val_data_loss', loss_data)
+            if not should_log_validation_artifacts(self):
+                return loss_data
             c_vis_list = self.c_net.draw_concentration_slices()
             log_image_artifact(
                 logger=self.logger,
                 image=c_vis_list,
                 image_key='val_C_compare',
-                step=self.current_epoch,
+                step=validation_epoch_step(self),
             )
         return loss_data
     
@@ -105,12 +107,14 @@ class CNet_DenoiseInit(Net_RBAResample):
         loss_data = ((c_observed - c_clean_pred) ** 2).mean()
         if batch_idx == 0:
             self.log('val_data_loss', loss_data)
+            if not should_log_validation_artifacts(self):
+                return loss_data
             c_vis_list = self.c_net.draw_concentration_slices()
             log_image_artifact(
                 logger=self.logger,
                 image=c_vis_list,
                 image_key='val_C_compare',
-                step=self.current_epoch,
+                step=validation_epoch_step(self),
             )
         return loss_data
 

@@ -5,11 +5,9 @@ do_training: true
 continue_training: true
 ckpt_path: "/public/home/bairuilianggroup/winfred/workspace/MRI_PINO/result/mlruns/589377894070960450/b686a634aef44010bf5810226c14246e/artifacts/checkpoints/ad_pde_p_k/phase_snapshot/dcpinn_ad_pde_p_k.pth"
 
-# NIfTI template input + explicit two-frame selection
-dcemrinp_data_path: "data/dce_mri/DEXI_084/preprocess_DCE/pdce2base_{04d}.nii"
+# PT sample input for the selected two-frame pair
+dcemrinp_data_path: "data/dce_mri/DEXI_083/1.0_21_22_samples.pt"
 brain_mask_path: "data/dce_mri/DEXI_084/brain_mask.nii.gz"
-frame_numbers: [21, 22]
-
 # --- Model Architecture ---
 neuron_num: 150
 c_neuron_num: 256
@@ -48,11 +46,11 @@ phases:
   ad_pde_p_k:
     incompressible: true
     learning_rate: 0.00005
-    max_epochs: 1
+    max_epochs: 100
     batch_size: 85000
 
   joint_ad_pde+joint_data:
     incompressible: true
-    learning_rate: 0.0001
-    max_epochs: 8000
+    learning_rate: 1.0e-8
+    max_epochs: 2000
     batch_size: 70000

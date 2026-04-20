@@ -96,7 +96,11 @@ class V_Net(nn.Module):
             vx, vy, vz = v[:, 0:1], v[:, 1:2], v[:, 2:3]
         return vx, vy, vz
 
-    def draw_velocity_volume(self, label="|v| magnitude"):
+    def draw_velocity_volume(
+        self,
+        label="Velocity magnitude (mm/min)",
+        title="Velocity field (mm/min)",
+    ):
         """
         mask: (nx, ny, nz) using that in char_domain
         pixdim: voxel spacing (3,) for physical quiver(unit mm/min) scaling
@@ -110,7 +114,14 @@ class V_Net(nn.Module):
             vx = vx.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[0] * mask_np
             vy = vy.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[1] * mask_np
             vz = vz.cpu().numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[2] * mask_np
-            rgb_img = fixed_quiver_image(vx, vy, vz, self.char_domain.pixdim, label=label)
+            rgb_img = fixed_quiver_image(
+                vx,
+                vy,
+                vz,
+                self.char_domain.pixdim,
+                label=label,
+                title=title,
+            )
             return rgb_img, vx, vy, vz
 
 

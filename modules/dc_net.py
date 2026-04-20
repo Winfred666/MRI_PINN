@@ -190,7 +190,12 @@ class V_DC_Net(nn.Module):
         return div_v
     
     # Get vx,vy,vz in unit of physical velocity
-    def draw_velocity_volume(self, chunk_size=32768):
+    def draw_velocity_volume(
+        self,
+        chunk_size=32768,
+        label="Velocity magnitude (mm/min)",
+        title="Velocity field (mm/min)",
+    ):
         """
         mask: (nx, ny, nz) using that in char_domain
         pixdim: voxel spacing (3,) for physical quiver scaling
@@ -216,7 +221,14 @@ class V_DC_Net(nn.Module):
         vx = torch.cat(vx_parts, dim=0).numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[0] * mask_np
         vy = torch.cat(vy_parts, dim=0).numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[1] * mask_np
         vz = torch.cat(vz_parts, dim=0).numpy().reshape((nx, ny, nz)) * self.char_domain.V_star[2] * mask_np
-        rgb_img = fixed_quiver_image(vx, vy, vz, self.char_domain.pixdim)
+        rgb_img = fixed_quiver_image(
+            vx,
+            vy,
+            vz,
+            self.char_domain.pixdim,
+            label=label,
+            title=title,
+        )
         return rgb_img, vx, vy, vz
 
 

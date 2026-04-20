@@ -4,7 +4,12 @@ import torch
 import torch.nn as nn
 from modules.rba_resample_trainer import Net_RBAResample
 from utils.forward_sim import advect_diffuse_forward_simulation
-from utils.mlflow_logging import log_histogram_artifact, log_image_artifact
+from utils.mlflow_logging import (
+    log_histogram_artifact,
+    log_image_artifact,
+    should_log_validation_artifacts,
+    validation_epoch_step,
+)
 
 
 class ADPINN_Base(Net_RBAResample):
@@ -89,19 +94,23 @@ class ADPINN_Base(Net_RBAResample):
 
         if batch_idx == 0:
             self.log('val_data_loss', val_loss)
+            if not should_log_validation_artifacts(self):
+                return val_loss
+
+            log_step = validation_epoch_step(self)
             c_vis = self.c_net.draw_concentration_slices()
             log_image_artifact(
                 logger=self.logger,
                 image=c_vis,
                 image_key='val_C_compare',
-                step=self.current_epoch,
+                step=log_step,
             )
             rgb_img, vx, vy, vz = self.v_net.draw_velocity_volume()
             log_image_artifact(
                 logger=self.logger,
                 image=rgb_img,
                 image_key='val_v_quiver',
-                step=self.current_epoch,
+                step=log_step,
             )
 
             log_image_artifact(
@@ -114,7 +123,7 @@ class ADPINN_Base(Net_RBAResample):
                     t_jump=max(1, min(8, self.ad_net.char_domain.domain_shape[3] - 1)),
                 ),
                 image_key='val_adv_diff_step',
-                step=self.current_epoch,
+                step=log_step,
             )
         
             # log velocity histogram
@@ -126,7 +135,7 @@ class ADPINN_Base(Net_RBAResample):
                 logger=self.logger,
                 values=flat_v,
                 hist_key='val_v_hist',
-                step=self.current_epoch,
+                step=log_step,
             )
             
         return val_loss

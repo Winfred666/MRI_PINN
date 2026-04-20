@@ -9,21 +9,37 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def _phase_scope(logger: Any) -> str:
-    phase_name = str(getattr(logger, "active_phase", "") or "").strip()
-    if not phase_name:
+def _sanitize_key_token(value: Any) -> str:
+    token = str(value).strip().strip("/").replace("/", "-")
+    if not token:
         return ""
-    return re.sub(r"[^0-9A-Za-z_.\-]", "_", phase_name)
+    token = re.sub(r"[^0-9A-Za-z_.\-]+", "_", token)
+    return token.strip("._-")
+
+
+def _phase_scope(logger: Any) -> str:
+    return _sanitize_key_token(getattr(logger, "active_phase", "") or "")
 
 
 def _scoped_key(logger: Any, key: str, prefix: str) -> str:
-    key_str = str(key).strip().strip("/")
+    key_str = _sanitize_key_token(key)
     if not key_str:
-        return key_str
+        return ""
+    prefix_str = _sanitize_key_token(prefix)
     phase_scope = _phase_scope(logger)
-    if not phase_scope:
-        return key_str
-    return f"{prefix}/{phase_scope}/{key_str}"
+    scoped_parts = [part for part in (prefix_str, phase_scope, key_str) if part]
+    return "-".join(scoped_parts)
+
+
+def validation_epoch_step(module: Any) -> int:
+    """Return a 1-based epoch index for validation artifact logging."""
+    return max(1, int(getattr(module, "current_epoch", 0)) + 1)
+
+
+def should_log_validation_artifacts(module: Any) -> bool:
+    """Skip expensive validation artifacts during Lightning sanity checks."""
+    trainer = getattr(module, "trainer", None)
+    return not bool(getattr(trainer, "sanity_checking", False))
 
 
 def log_image_artifact(
