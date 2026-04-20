@@ -354,7 +354,7 @@ class DCPINN_ADPDE_P_K(DCPINN_ADPDE_P):
                  rba_memory=0.999,
                  enable_rbar=True,
                  enable_td_weight=True,
-                 validate_v_slices=[43, 45, 49, 50]):
+                 validate_v_slices=[66, 68, 70, 71]):
         super().__init__(ad_dc_net,
                          num_train_points,
                          incompressible=incompressible,
