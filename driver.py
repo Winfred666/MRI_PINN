@@ -7,7 +7,7 @@ import torch
 # --- Common utility imports ---
 from utils.config_loader import Train_Config
 from utils.train_wrapper import train_all_phases
-from utils.io import load_dcemri_data, save_velocity_mat, load_DTI
+from utils.io import load_dcemri_data, save_velocity_pt, load_DTI
 from utils.velocity_guess import front_tracking_velocity
 from modules.data_module import CharacteristicDomain, DCEMRIDataModule, VelocityDataModule
 from modules.filtered_modules import create_outlier_filter_mask, FilteredDCEMRIDataModule
@@ -180,15 +180,15 @@ def main(config_path):
         f"({vz.min():.3f}, {vz.max():.3f})"
     )
 
-    # Save velocity field for external analysis (e.g., MATLAB)
+    # Save velocity field in recovered physical units for downstream analysis.
     os.makedirs(cfg.result_folder, exist_ok=True)
-    save_path = f"{cfg.result_folder}/predict_velocity.mat"
+    save_path = f"{cfg.result_folder}/predict_velocity.pt"
     if cfg.model_type == 'dc':
         D_to_save = pinn_model.ad_dc_net.D.item() if not cfg.use_DTI else pinn_model.ad_dc_net.D_normalized.item()
     else: # 'ad'
         D_to_save = pinn_model.ad_net.D.item() if not cfg.use_DTI else pinn_model.ad_net.D_normalized.item()
 
-    save_velocity_mat(vx, vy, vz, pixdim, D=D_to_save, use_DTI=cfg.use_DTI, path=save_path)
+    save_velocity_pt(vx, vy, vz, pixdim, D=D_to_save, use_DTI=cfg.use_DTI, path=save_path)
     print(f"Velocity and diffusivity data saved to {save_path}")
 
 if __name__ == "__main__":

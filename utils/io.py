@@ -267,8 +267,8 @@ def load_dcemri_data(path, brain_mask_path=None, frame_numbers=None):
 
 
 
-def save_velocity_mat(vx, vy, vz, pixdim, D, use_DTI, path="data/ad_net_velocity_corrected.mat"):
-    # Inputs vx/vy/vz are expected in physical unit (mm/min), each shaped (nx, ny, nz).
+def save_velocity_pt(vx, vy, vz, pixdim, D, use_DTI, path="data/ad_net_velocity_physics.pt"):
+    """Persist the recovered 3D velocity field directly in physical units."""
     vx = np.asarray(vx, dtype=np.float32)
     vy = np.asarray(vy, dtype=np.float32)
     vz = np.asarray(vz, dtype=np.float32)
@@ -277,33 +277,23 @@ def save_velocity_mat(vx, vy, vz, pixdim, D, use_DTI, path="data/ad_net_velocity
     if vx.shape != vy.shape or vx.shape != vz.shape:
         raise ValueError(f"Velocity component shape mismatch: vx {vx.shape}, vy {vy.shape}, vz {vz.shape}")
 
-    velocity_3d_mm_min = np.stack([vx, vy, vz], axis=-1)  # (nx, ny, nz, 3)
-    velocity_3d_cell_min = np.stack(
-        [vx / pixdim[0], vy / pixdim[1], vz / pixdim[2]],
-        axis=-1,
-    )
-
-    # Keep legacy flattened vector for backward compatibility with old scripts.
-    vx_flat = velocity_3d_cell_min[..., 0].reshape(-1)
-    vy_flat = velocity_3d_cell_min[..., 1].reshape(-1)
-    vz_flat = velocity_3d_cell_min[..., 2].reshape(-1)
-    v_single_timestep = np.concatenate([vx_flat, vy_flat, vz_flat])
-    legacy_u = np.tile(v_single_timestep, 4).reshape(-1, 1)
+    velocity_3d_mm_min = np.stack([vx, vy, vz], axis=-1)
 
     payload = {
-        "vx_mm_min": vx,
-        "vy_mm_min": vy,
-        "vz_mm_min": vz,
-        "velocity_3d_mm_min": velocity_3d_mm_min,
-        "velocity_3d_cell_min": velocity_3d_cell_min,
-        "u": legacy_u,
-        "pixdim": pixdim,
+        "vx_mm_min": torch.from_numpy(vx.copy()),
+        "vy_mm_min": torch.from_numpy(vy.copy()),
+        "vz_mm_min": torch.from_numpy(vz.copy()),
+        "velocity_3d_mm_min": torch.from_numpy(velocity_3d_mm_min.copy()),
+        "pixdim_mm": torch.from_numpy(pixdim.copy()),
         "D": float(D),
         "use_DTI": bool(use_DTI),
+        "unit": "mm/min",
+        "component_order": ("vx", "vy", "vz"),
+        "layout": "(nx, ny, nz, 3)",
     }
 
     print(f"Saving 3D velocity field to: {path}, shape={velocity_3d_mm_min.shape}")
-    sio.savemat(path, payload)
+    torch.save(payload, path)
 
 
 
