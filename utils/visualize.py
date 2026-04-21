@@ -482,17 +482,17 @@ def draw_nifti_slices_with_time(pred_imgs, gt_imgs=None, brain_mask=None, normal
 
 
 # now given three 2D image, generate predict + gt + error to form a bigger image
-def visualize_prediction_vs_groundtruth(pred_img, gt_img, vmin=0, vmax=1):
+def visualize_prediction_vs_groundtruth(pred_img, gt_img, vmin=0, vmax=1, include_error=True):
     assert pred_img.shape == gt_img.shape, "Prediction and ground truth images must have the same shape."
     # first all shrink to 0-1 range
     img_max = max(pred_img.max(), gt_img.max())
     img_min = min(pred_img.min(), gt_img.min())
     pred_img = (pred_img - img_min) / (img_max - img_min + 1e-8)
     gt_img = (gt_img - img_min) / (img_max - img_min + 1e-8)
-    # Compute absolute error 
-    error_img = np.abs(pred_img - gt_img)
-    # Stack images just horizontally
-    stacked = np.vstack((gt_img, pred_img, error_img))
+    panels = [gt_img, pred_img]
+    if include_error:
+        panels.append(np.abs(pred_img - gt_img))
+    stacked = np.vstack(panels)
     # Clip values for visualization
     stacked = np.clip(stacked, vmin, vmax)
     return stacked

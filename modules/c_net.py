@@ -100,41 +100,61 @@ class C_Net(nn.Module):
         self.sigma_reg_weight = 0.001 # Regularization weight for sigma
         self.sigma_0 = 0.01  # minimum noise level
 
-        # --- Keep validation attributes ---
-        self.val_slice_z = self._build_safe_slice_indices(
-            total_size=char_domain.domain_shape[2],
-            requested=[char_domain.domain_shape[2] // 2 - 6, char_domain.domain_shape[2] // 2, char_domain.domain_shape[2] // 2 + 6],
-            fallback_count=3,
+        # Validation uses five interpolated time points across the full sequence
+        # but always visualizes only the mid-z slice in physical concentration units.
+        self.val_slice_zindex = [int(char_domain.domain_shape[2] // 2)]
+        self.val_slice_t_normalized = np.linspace(
+            float(char_domain.t_normalized[0]),
+            float(char_domain.t_normalized[-1]),
+            5,
+            dtype=np.float32,
         )
-        base_t = char_domain.domain_shape[3] // 4 * 2
-        self.val_slice_t = self._build_safe_slice_indices(
-            total_size=char_domain.domain_shape[3],
-            requested=[base_t - 6, base_t - 3, base_t, base_t + 3],
-            fallback_count=4,
+        self.val_slice_4d = self._build_validation_grid()
+        self.gt_data = np.asarray(data, dtype=np.float32)
+        self.val_slice_gt_c = self._build_validation_gt_slices()
+
+    def _build_validation_grid(self):
+        nx, ny, nz = self.char_domain.domain_shape[:3]
+        x = np.linspace(-1.0, 1.0, nx, dtype=np.float32)
+        y = np.linspace(-1.0, 1.0, ny, dtype=np.float32)
+        z = np.linspace(-1.0, 1.0, nz, dtype=np.float32)[self.val_slice_zindex]
+        X, Y, Z, T = np.meshgrid(
+            x,
+            y,
+            z,
+            self.val_slice_t_normalized,
+            indexing="ij",
         )
-        self.val_slice_4d = char_domain.get_characteristic_geotimedomain(slice_zindex=self.val_slice_z,
-                                                                       slice_tindex=self.val_slice_t) # (6 slice * N,4)
-        Z, T = np.meshgrid(self.val_slice_z, self.val_slice_t, indexing='ij')
-        self.gt_data = data / self.C_star # data in characteristic domain, only for revalidation.
-        self.val_slice_gt_c = self.gt_data[:, :, Z, T]
+        grid_points = np.column_stack([X.ravel(), Y.ravel(), Z.ravel(), T.ravel()])
+        return torch.as_tensor(grid_points, dtype=torch.float32, device=self.char_domain.device)
 
-    @staticmethod
-    def _build_safe_slice_indices(total_size, requested, fallback_count):
-        total_size = int(total_size)
-        if total_size <= 0:
-            return [0]
+    def _interpolate_gt_volume(self, normalized_time):
+        target_time = float(self.char_domain.recover_time_numpy(np.asarray(normalized_time, dtype=np.float32)))
+        time_axis = np.asarray(self.char_domain.t, dtype=np.float32)
 
-        if total_size <= fallback_count:
-            return list(range(total_size))
+        if target_time <= float(time_axis[0]):
+            return self.gt_data[:, :, :, 0]
+        if target_time >= float(time_axis[-1]):
+            return self.gt_data[:, :, :, -1]
 
-        safe = []
-        for idx in requested:
-            idx_i = int(np.clip(idx, 0, total_size - 1))
-            if idx_i not in safe:
-                safe.append(idx_i)
-        if len(safe) == 0:
-            safe = list(np.linspace(0, total_size - 1, num=min(fallback_count, total_size), dtype=int))
-        return safe
+        upper = int(np.searchsorted(time_axis, target_time, side="right"))
+        lower = max(0, upper - 1)
+        upper = min(upper, len(time_axis) - 1)
+        t0 = float(time_axis[lower])
+        t1 = float(time_axis[upper])
+        if upper == lower or t1 <= t0:
+            return self.gt_data[:, :, :, lower]
+
+        alpha = (target_time - t0) / (t1 - t0)
+        return (1.0 - alpha) * self.gt_data[:, :, :, lower] + alpha * self.gt_data[:, :, :, upper]
+
+    def _build_validation_gt_slices(self):
+        gt_slices = []
+        z_index = self.val_slice_zindex[0]
+        for normalized_time in self.val_slice_t_normalized:
+            interpolated_volume = self._interpolate_gt_volume(normalized_time)
+            gt_slices.append(interpolated_volume[:, :, z_index])
+        return np.stack(gt_slices, axis=-1)[:, :, None, :]
 
     def forward(self, X_train):
         # Explicitly define the forward pass logic for concentration
@@ -173,22 +193,32 @@ class C_Net(nn.Module):
 
         return nll_loss, sigma_pred, errp2
 
-    def draw_concentration_slices(self, ):
+    def draw_concentration_slices(self, include_error=True):
         with torch.no_grad():
             # Ensure val_slice_4d is on the correct device (vanilla pytorch has to do so)
             device = next(self.parameters()).device
             val_coords = self.val_slice_4d.to(device)
             
             vol_disp_all = self(val_coords).cpu().numpy().reshape(
-                self.char_domain.domain_shape[0], self.char_domain.domain_shape[1], len(self.val_slice_z), len(self.val_slice_t))
+                self.char_domain.domain_shape[0],
+                self.char_domain.domain_shape[1],
+                len(self.val_slice_zindex),
+                len(self.val_slice_t_normalized),
+            )
             vol_disp_all = vol_disp_all * self.C_star
             c_vis_list = []
-            for i in range(len(self.val_slice_z)):
-                for j in range(len(self.val_slice_t)):
-                    slice_gt_c = self.val_slice_gt_c[:, :, i, j] * self.C_star
+            for i in range(len(self.val_slice_zindex)):
+                for j in range(len(self.val_slice_t_normalized)):
+                    slice_gt_c = self.val_slice_gt_c[:, :, i, j]
                     vol_disp = vol_disp_all[:, :, i, j]
-                    vol_disp *= self.char_domain.mask[:, :, self.val_slice_z[i]]
-                    c_vis_list.append(visualize_prediction_vs_groundtruth(vol_disp, slice_gt_c))
+                    vol_disp *= self.char_domain.mask[:, :, self.val_slice_zindex[i]]
+                    c_vis_list.append(
+                        visualize_prediction_vs_groundtruth(
+                            vol_disp,
+                            slice_gt_c,
+                            include_error=include_error,
+                        )
+                    )
             return np.hstack(c_vis_list)
 
     # X should be the raw tuple extract from datamodule. D_coef could be number or tensor of shape (N,3,3)

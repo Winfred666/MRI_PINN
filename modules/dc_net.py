@@ -7,6 +7,18 @@ from modules.data_module import CharacteristicDomain
 from modules.positional_encoding import PositionalEncoding_Geo
 from utils.visualize import fixed_quiver_image, draw_colorful_slice_image
 
+
+def _clamped_unique_indices(requested, total_size):
+    total_size = int(total_size)
+    if total_size <= 0:
+        return [0]
+    return sorted(
+        {
+            int(np.clip(idx, 0, total_size - 1))
+            for idx in requested
+        }
+    )
+
 class P_Net(nn.Module):
     """
     Steady (time–independent) pressure network.
@@ -43,10 +55,9 @@ class P_Net(nn.Module):
             hidden_features=p_layers[1],
         )
 
-        self.val_slice_z = C_Net._build_safe_slice_indices(
+        self.val_slice_z = _clamped_unique_indices(
+            [char_domain.domain_shape[2] // 2 - 6, char_domain.domain_shape[2] // 2, char_domain.domain_shape[2] // 2 + 6],
             total_size=char_domain.domain_shape[2],
-            requested=[char_domain.domain_shape[2] // 2 - 6, char_domain.domain_shape[2] // 2, char_domain.domain_shape[2] // 2 + 6],
-            fallback_count=3,
         )
         # Build 3D (X,Y,Z) sample points using existing helper; only Z vary (X,Y maybe mid-plane if helper does so)
         self.val_slice_3d = char_domain.get_characteristic_geodomain(slice_zindex=self.val_slice_z)

@@ -66,9 +66,8 @@ class DCPINN_Base(Net_RBAResample):
     # accept v of mm/min (physical space), so that time like t_index and t_jump is appropriate.
     def validate_forward_step(self, vx, vy, vz, t_index, t_jump):
         char_domain = self.ad_dc_net.char_domain
-        c_scale = float(getattr(self.ad_dc_net.c_net, "C_star", 1.0))
-        start_c = self.ad_dc_net.c_net.gt_data[:, :, :, t_index] * c_scale
-        end_c = self.ad_dc_net.c_net.gt_data[:, :, :, t_index + t_jump] * c_scale
+        start_c = self.ad_dc_net.c_net.gt_data[:, :, :, t_index]
+        end_c = self.ad_dc_net.c_net.gt_data[:, :, :, t_index + t_jump]
 
         t_duration = float(char_domain.t[t_index + t_jump] - char_domain.t[t_index])
         
@@ -121,7 +120,7 @@ class DCPINN_Base(Net_RBAResample):
             else:
                 self.log('Scale factor for DTI', self.ad_dc_net.D)
             
-            c_vis = self.ad_dc_net.c_net.draw_concentration_slices()
+            c_vis = self.ad_dc_net.c_net.draw_concentration_slices(include_error=False)
             log_image_artifact(
                 logger=self.logger,
                 image=c_vis,
