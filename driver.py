@@ -80,8 +80,11 @@ def main(config_path):
                                            batch_size=int(mask.sum()),
                                            num_workers=cfg.dataset_num_workers, device=device)
         
-        P_star = np.mean(char_domain.V_star * cfg.viscosity * char_domain.L_star / k_dataset.K_star)
+        p_star_axes = char_domain.V_star * cfg.viscosity * char_domain.L_star / k_dataset.K_star
+        P_star = float(np.mean(p_star_axes))
+        darcy_velocity_scale = P_star / p_star_axes
         print(f"P_star: {P_star}")
+        print(f"Darcy characteristic velocity scale: {darcy_velocity_scale}")
 
         def trainer_getter(train_phase, ad_dc_net, phase_cfg={}):
             nonlocal c_dataset # Allow modification of the outer scope c_dataset
@@ -107,7 +110,7 @@ def main(config_path):
                         k_layers=[3] + [cfg.neuron_num] * cfg.hid_layer_num + [1],
                         p_layers=[3] + [cfg.neuron_num] * cfg.hid_layer_num + [1],
                         data=data, char_domain=char_domain, C_star=c_dataset.C_star,
-                        K_star=k_dataset.K_star, P_star=P_star,
+                        K_star=k_dataset.K_star, P_star=P_star, darcy_velocity_scale=darcy_velocity_scale,
                         positional_encoding=cfg.use_positional_encoding,
                         freq_nums=cfg.positional_encode_nums,
                         gamma_space=cfg.position_encode_freq_scale,

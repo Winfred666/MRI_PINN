@@ -32,12 +32,25 @@ class CharacteristicDomain():
         self.presample_epoch = presample_epoch
 
     def set_DTI_or_coef(self, DTI_or_coef):
-        # if we already using DTI, then we should set Pe = 3.0 (water/tracer's diffusivity)
-        self.Pe_g = (self.V_star.mean() * self.L_star.mean() / DTI_or_coef) if isinstance(DTI_or_coef, float) else 3.0  # global Peclet number
-        # for better leverage
-        self.DTI_or_coef = torch.tensor(DTI_or_coef, dtype=torch.float32).to(self.device)  # either a float (isotropic coeff) tensor or a (nx,ny,nz,3,3) tensor
-        if not isinstance(DTI_or_coef, float):
-            self.DTI_or_coef = self.DTI_or_coef.permute(3, 4, 0, 1, 2).reshape(1, 9, *self.DTI_or_coef.shape[0:3]) # shape: (1, 9, Nx, Ny, Nz)
+        raw = np.asarray(DTI_or_coef)
+        is_scalar = raw.ndim == 0
+
+        if is_scalar:
+            diffusion_phys = float(raw)
+            if diffusion_phys <= 0:
+                raise ValueError(f"Isotropic diffusion coefficient must be positive, got {diffusion_phys}.")
+            # Scalar diffusivity is provided in physical units (mm^2 / min).
+            # Store the characteristic-space coefficient used by the PDE:
+            # D* = D_phys / (L*_mean * V*_mean) = 1 / Pe.
+            self.Pe_g = float(self.V_star.mean() * self.L_star.mean() / diffusion_phys)
+            self.DTI_or_coef = torch.tensor(1.0 / self.Pe_g, dtype=torch.float32, device=self.device)
+            return
+
+        # If we already using DTI, then we should set Pe = 3.0 (water/tracer's diffusivity).
+        # The DTI tensor is expected to already be converted to characteristic units.
+        self.Pe_g = 3.0
+        self.DTI_or_coef = torch.tensor(DTI_or_coef, dtype=torch.float32, device=self.device)
+        self.DTI_or_coef = self.DTI_or_coef.permute(3, 4, 0, 1, 2).reshape(1, 9, *self.DTI_or_coef.shape[0:3]) # shape: (1, 9, Nx, Ny, Nz)
 
     # X that feed in PINN is already from [-1, 1], so 
     # also provide method to recover characteristic length and time scale to real world units

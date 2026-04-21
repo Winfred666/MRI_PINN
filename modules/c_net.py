@@ -288,19 +288,20 @@ class C_Net(nn.Module):
             c_laplacian = self.char_domain.DTI_or_coef * c_laplacian
         return c_spatial_grad, c_t, c_laplacian.unsqueeze(1) # shaped (N, 1)
 
-    # calculate gradient and laplace outside (better getting anisotropic c_laplacian beforehand)
-    def get_TD_RBA_scale(self, t_list, c_grad, c_laplacian):
-        assert c_grad is not None and c_laplacian is not None
+    # calculate gradient and diffusion term outside (better getting anisotropic diffusion beforehand)
+    def get_TD_RBA_scale(self, t_list, c_grad, c_diffusion):
+        assert c_grad is not None and c_diffusion is not None
         # detach early to avoid extra gradient flow
         t_list = t_list.detach()
         c_grad = c_grad.detach()
-        c_laplacian = c_laplacian.detach()
+        c_diffusion = c_diffusion.detach()
         # Calculate the scaling factor for each time point
         all_terms = torch.stack([
             c_grad[:, 0].abs(),
             c_grad[:, 1].abs(),
             c_grad[:, 2].abs(),
-            (c_grad[:, 3] - (1/self.char_domain.Pe_g) * c_laplacian.squeeze()).abs()
+            # c_diffusion is already the characteristic diffusion term.
+            (c_grad[:, 3] - c_diffusion.squeeze()).abs()
         ], dim=1) # Shape: (N, 4)
 
         # Vectorized approach to find max scale per unique time

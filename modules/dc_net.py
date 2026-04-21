@@ -16,7 +16,7 @@ class P_Net(nn.Module):
     def __init__(self,
                  p_layers,
                  char_domain: CharacteristicDomain,
-                 P_star, # (3,) array-like for x,y,z P_grad.
+                 P_star,
                  positional_encoding=True,
                  freq_nums=(8, 8, 8, 0),
                  gamma_space=1.0):
@@ -42,8 +42,12 @@ class P_Net(nn.Module):
             hidden_layers=len(p_layers) - 2,
             hidden_features=p_layers[1],
         )
-        
-        self.val_slice_z = [char_domain.domain_shape[2] // 2 - 6, char_domain.domain_shape[2] // 2, char_domain.domain_shape[2] // 2 + 6]
+
+        self.val_slice_z = C_Net._build_safe_slice_indices(
+            total_size=char_domain.domain_shape[2],
+            requested=[char_domain.domain_shape[2] // 2 - 6, char_domain.domain_shape[2] // 2, char_domain.domain_shape[2] // 2 + 6],
+            fallback_count=3,
+        )
         # Build 3D (X,Y,Z) sample points using existing helper; only Z vary (X,Y maybe mid-plane if helper does so)
         self.val_slice_3d = char_domain.get_characteristic_geodomain(slice_zindex=self.val_slice_z)
         self.val_volume_3d = char_domain.get_characteristic_geodomain()
@@ -127,14 +131,14 @@ class K_Net(P_Net):
 class V_DC_Net(nn.Module):
     """
     Darcy velocity network:
-    v = - grad(p) / k 
+    v_char = - darcy_velocity_scale * k_char * grad_char(p_char)
     Pressure & permeability are steady (spatial only).
     """
     def __init__(self,
                  p_layers,
                  k_layers,
                  char_domain: CharacteristicDomain,
-                 K_star, P_star,
+                 K_star, P_star, darcy_velocity_scale,
                  positional_encoding=True,
                  freq_nums=(8,8,8,0),
                  gamma_space=1.0):
@@ -153,6 +157,10 @@ class V_DC_Net(nn.Module):
                            gamma_space=gamma_space)
         self.char_domain = char_domain
         self.val_volume_3d = char_domain.get_characteristic_geodomain().to(torch.float32)
+        self.register_buffer(
+            "darcy_velocity_scale",
+            torch.as_tensor(darcy_velocity_scale, dtype=torch.float32).reshape(3),
+        )
 
     def forward(self, X, create_graph=True):
         with torch.enable_grad():
@@ -170,7 +178,9 @@ class V_DC_Net(nn.Module):
         else:
             with torch.no_grad():
                 k = self.k_net(X)
-        v = -grad_p * k
+        # Pressure is normalized with a single scalar P_star, while space is normalized
+        # axis-wise by L_star. This correction keeps Darcy velocity in characteristic units.
+        v = -(grad_p * self.darcy_velocity_scale.view(1, 3)) * k
         vx, vy, vz = v[:, 0:1], v[:, 1:2], v[:, 2:3]
 
         return vx, vy, vz
@@ -239,7 +249,7 @@ class AD_DC_Net(nn.Module):
     """
     def __init__(self,
                  c_layers, p_layers, k_layers,
-                 data, C_star, K_star, P_star,
+                 data, C_star, K_star, P_star, darcy_velocity_scale,
                  char_domain: CharacteristicDomain,
                  freq_nums=(8,8,8,0),
                  positional_encoding=True,
@@ -261,6 +271,7 @@ class AD_DC_Net(nn.Module):
                                  char_domain,
                                  K_star,
                                  P_star,
+                                 darcy_velocity_scale,
                                  positional_encoding=positional_encoding,
                                  freq_nums=freq_nums,
                                  gamma_space=gamma_space)
