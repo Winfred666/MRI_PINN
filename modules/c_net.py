@@ -100,15 +100,11 @@ class C_Net(nn.Module):
         self.sigma_reg_weight = 0.001 # Regularization weight for sigma
         self.sigma_0 = 0.01  # minimum noise level
 
-        # Validation uses five interpolated time points across the full sequence
-        # but always visualizes only the mid-z slice in physical concentration units.
+        # Validation shows five evenly spaced model snapshots across the full
+        # characteristic time span, but GT is always taken from the nearest
+        # real frame without interpolation.
         self.val_slice_zindex = [int(char_domain.domain_shape[2] // 2)]
-        self.val_slice_t_normalized = np.linspace(
-            float(char_domain.t_normalized[0]),
-            float(char_domain.t_normalized[-1]),
-            5,
-            dtype=np.float32,
-        )
+        self.val_slice_t_normalized = np.linspace(0.0, 1.0, 5, dtype=np.float32)
         self.val_slice_4d = self._build_validation_grid()
         self.gt_data = np.asarray(data, dtype=np.float32)
         self.val_slice_gt_c = self._build_validation_gt_slices()
@@ -118,43 +114,36 @@ class C_Net(nn.Module):
         x = np.linspace(-1.0, 1.0, nx, dtype=np.float32)
         y = np.linspace(-1.0, 1.0, ny, dtype=np.float32)
         z = np.linspace(-1.0, 1.0, nz, dtype=np.float32)[self.val_slice_zindex]
+        t_char = np.linspace(
+            float(self.char_domain.t_normalized[0]),
+            float(self.char_domain.t_normalized[-1]),
+            len(self.val_slice_t_normalized),
+            dtype=np.float32,
+        )
         X, Y, Z, T = np.meshgrid(
             x,
             y,
             z,
-            self.val_slice_t_normalized,
+            t_char,
             indexing="ij",
         )
         grid_points = np.column_stack([X.ravel(), Y.ravel(), Z.ravel(), T.ravel()])
         return torch.as_tensor(grid_points, dtype=torch.float32, device=self.char_domain.device)
 
-    def _interpolate_gt_volume(self, normalized_time):
-        target_time = float(self.char_domain.recover_time_numpy(np.asarray(normalized_time, dtype=np.float32)))
-        time_axis = np.asarray(self.char_domain.t, dtype=np.float32)
-
-        if target_time <= float(time_axis[0]):
-            return self.gt_data[:, :, :, 0]
-        if target_time >= float(time_axis[-1]):
-            return self.gt_data[:, :, :, -1]
-
-        upper = int(np.searchsorted(time_axis, target_time, side="right"))
-        lower = max(0, upper - 1)
-        upper = min(upper, len(time_axis) - 1)
-        t0 = float(time_axis[lower])
-        t1 = float(time_axis[upper])
-        if upper == lower or t1 <= t0:
-            return self.gt_data[:, :, :, lower]
-
-        alpha = (target_time - t0) / (t1 - t0)
-        return (1.0 - alpha) * self.gt_data[:, :, :, lower] + alpha * self.gt_data[:, :, :, upper]
-
     def _build_validation_gt_slices(self):
-        gt_slices = []
         z_index = self.val_slice_zindex[0]
-        for normalized_time in self.val_slice_t_normalized:
-            interpolated_volume = self._interpolate_gt_volume(normalized_time)
-            gt_slices.append(interpolated_volume[:, :, z_index])
-        return np.stack(gt_slices, axis=-1)[:, :, None, :]
+        nt = int(self.char_domain.domain_shape[3])
+        if nt <= 1:
+            self.val_slice_tindex = np.zeros(len(self.val_slice_t_normalized), dtype=int)
+        else:
+            frame_positions = self.val_slice_t_normalized * float(nt)
+            self.val_slice_tindex = np.clip(
+                np.round(frame_positions).astype(int),
+                0,
+                nt - 1,
+            )
+        gt_slices = self.gt_data[:, :, z_index, self.val_slice_tindex]
+        return gt_slices[:, :, None, :]
 
     def forward(self, X_train):
         # Explicitly define the forward pass logic for concentration
@@ -193,7 +182,7 @@ class C_Net(nn.Module):
 
         return nll_loss, sigma_pred, errp2
 
-    def draw_concentration_slices(self, include_error=True):
+    def draw_concentration_slices(self):
         with torch.no_grad():
             # Ensure val_slice_4d is on the correct device (vanilla pytorch has to do so)
             device = next(self.parameters()).device
@@ -216,7 +205,6 @@ class C_Net(nn.Module):
                         visualize_prediction_vs_groundtruth(
                             vol_disp,
                             slice_gt_c,
-                            include_error=include_error,
                         )
                     )
             return np.hstack(c_vis_list)

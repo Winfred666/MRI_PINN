@@ -120,7 +120,7 @@ class DCPINN_Base(Net_RBAResample):
             else:
                 self.log('Scale factor for DTI', self.ad_dc_net.D)
             
-            c_vis = self.ad_dc_net.c_net.draw_concentration_slices(include_error=False)
+            c_vis = self.ad_dc_net.c_net.draw_concentration_slices()
             log_image_artifact(
                 logger=self.logger,
                 image=c_vis,

@@ -481,21 +481,34 @@ def draw_nifti_slices_with_time(pred_imgs, gt_imgs=None, brain_mask=None, normal
     }
 
 
-# now given three 2D image, generate predict + gt + error to form a bigger image
-def visualize_prediction_vs_groundtruth(pred_img, gt_img, vmin=0, vmax=1, include_error=True):
+# now given three 2D image, generate predict + gt + residual to form a bigger image
+def visualize_prediction_vs_groundtruth(pred_img, gt_img):
+    pred_img = np.asarray(pred_img, dtype=np.float32)
+    gt_img = np.asarray(gt_img, dtype=np.float32)
     assert pred_img.shape == gt_img.shape, "Prediction and ground truth images must have the same shape."
-    # first all shrink to 0-1 range
-    img_max = max(pred_img.max(), gt_img.max())
-    img_min = min(pred_img.min(), gt_img.min())
-    pred_img = (pred_img - img_min) / (img_max - img_min + 1e-8)
-    gt_img = (gt_img - img_min) / (img_max - img_min + 1e-8)
-    panels = [gt_img, pred_img]
-    if include_error:
-        panels.append(np.abs(pred_img - gt_img))
-    stacked = np.vstack(panels)
-    # Clip values for visualization
-    stacked = np.clip(stacked, vmin, vmax)
-    return stacked
+
+    pred_vis = draw_colorful_slice_image(
+        pred_img,
+        cmap='jet',
+        vmin=0.0,
+        vmax=3.0,
+        show_colorbar=False,
+    )
+    gt_vis = draw_colorful_slice_image(
+        gt_img,
+        cmap='jet',
+        vmin=0.0,
+        vmax=3.0,
+        show_colorbar=False,
+    )
+    residual_vis = draw_colorful_slice_image(
+        pred_img - gt_img,
+        cmap='jet',
+        vmin=-0.04,
+        vmax=0.04,
+        show_colorbar=False,
+    )
+    return np.vstack([pred_vis, gt_vis, residual_vis])
 
 # Add a fixed-view quiver exporter returning an RGB array
 def fixed_quiver_image(
@@ -585,7 +598,7 @@ def fixed_quiver_image(
     return rgb
 
 
-def draw_colorful_slice_image(slice_data, cmap='viridis', mask=None):
+def draw_colorful_slice_image(slice_data, cmap='viridis', mask=None, vmin=None, vmax=None, show_colorbar=True):
     """
     Renders a 2D data slice into a colorful RGB image array in a headless manner.
     The plot has no axes or title, and a tight colorbar showing the original data range.
@@ -600,24 +613,35 @@ def draw_colorful_slice_image(slice_data, cmap='viridis', mask=None):
 
     # Handle mask if provided
     if mask is not None:
-        # Determine data range for the color bar, should only select in mask
-        vmin = slice_data[mask].min()
-        vmax = slice_data[mask].max()
+        if np.any(mask):
+            # Determine data range for the color bar, should only select in mask
+            if vmin is None:
+                vmin = slice_data[mask].min()
+            if vmax is None:
+                vmax = slice_data[mask].max()
+        else:
+            if vmin is None:
+                vmin = 0.0
+            if vmax is None:
+                vmax = 1.0
         # Mask where mask is False
         slice_data = np.ma.masked_where(~mask, slice_data)
         cmap = plt.get_cmap(cmap).copy()
         cmap.set_bad(color='white')
     else:
-        vmin = slice_data.min()
-        vmax = slice_data.max()
+        if vmin is None:
+            vmin = slice_data.min()
+        if vmax is None:
+            vmax = slice_data.max()
     # Create figure and axes with a specific size and DPI
     fig, ax = plt.subplots(figsize=(4, 4), dpi=100)
 
     # Plot the image data. imshow handles mapping values to the colormap via vmin/vmax.
     im = ax.imshow(slice_data, cmap=cmap, vmin=vmin, vmax=vmax, origin='lower', interpolation='nearest')
 
-    # Add a colorbar, making it compact
-    fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
+    if show_colorbar:
+        # Add a colorbar, making it compact
+        fig.colorbar(im, ax=ax, shrink=0.8, pad=0.02)
     # Remove axis ticks and labels
     ax.axis('off')
     # Ensure tight layout before rendering
