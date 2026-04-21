@@ -1,0 +1,81 @@
+# Auto-generated DCPINN sim-series config for DEXI_083 optcase 11_12.
+# Train from concentration initialization through the final joint phase.
+
+do_training: true
+continue_training: true
+ckpt_path: "result/pinn_temp_ckpt/dcpinn_dexi083_optcase11_12_denoise_c.ckpt"
+dcemrinp_data_path: "data/optcase/optcase_all_pure_advect_20260420_200929/DEXI_083_32_11_12_sim10_opt320/dt0.100000_dx0.031250_simsteps10_f2_20260420_2344/samples.pt"
+brain_mask_path: "data/dce_mri/DEXI_083/brain_mask.nii.gz"
+
+# --- Model Architecture ---
+neuron_num: 150
+c_neuron_num: 256
+hid_layer_num: 5
+
+# --- Feature Engineering ---
+positional_encoding:
+  use: false
+  freq_nums: [20, 20, 20, 0]
+  freq_scale: 1.0
+
+cuda_visible_devices: [0]
+
+# --- Physics & PDE Configuration ---
+use_DTI: false
+use_learnable_D: false
+viscosity: 6.95e-4
+
+# --- Logging ---
+logging:
+  backend: mlflow
+  tracking_uri: "http://172.100.100.100:5000"
+  experiment: "mr-aiv"
+
+# --- RBAR (Residual-Based Attention Resampling) ---
+enable_rbar: true
+
+# --- Dataloader & Checkpointing Settings ---
+reload_dataloaders_every_n_epochs: 100
+ckpt_save_val_interval: 200
+dataset_num_workers: 0
+enable_validation: true
+
+# --- Training Phases ---
+phases:
+#   init_c_data:
+#     learning_rate: 0.0005
+#     max_epochs: 3000
+#     batch_size: 85000
+
+  init_c_denoise_data:
+    learning_rate: 0.0005
+    max_epochs: 1000
+    batch_size: 85000
+
+  init_k_data:
+    learning_rate: 0.002
+    max_epochs: 1000
+    batch_size: 85000
+
+  init_p_data:
+    learning_rate: 0.002
+    max_epochs: 1000
+    batch_size: 85000
+
+  ad_pde_p:
+    incompressible: false
+    learning_rate: 0.0001
+    max_epochs: 2000
+    batch_size: 85000
+
+  ad_pde_p_k:
+    incompressible: false
+    learning_rate: 0.00005
+    max_epochs: 2000
+    batch_size: 85000
+
+  joint_ad_pde+joint_data:
+    incompressible: false
+    learning_rate: 1.0e-5
+    max_epochs: 2000
+    batch_size: 70000
