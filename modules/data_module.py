@@ -342,10 +342,11 @@ class DCEMRIDataModule(RBAResampleDataModule):
         """
         print("Running optimized DCEMRIDataModule setup...")
         
-        # 1. Get all time steps and create train/val splits
+        # 1. Use every frame for training, and mirror the same full grid for
+        # validation so validation is evaluated without RBAR resampling.
         all_times = self.char_domain.t_normalized
-        train_indices_t = np.arange(0, len(all_times), 2)
-        val_indices_t = np.arange(1, len(all_times), 2)
+        train_indices_t = np.arange(len(all_times))
+        val_indices_t = train_indices_t.copy()
         
         train_times = all_times[train_indices_t]
         val_times = all_times[val_indices_t]
